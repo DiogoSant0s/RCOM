@@ -66,16 +66,16 @@ int main(int argc, char *argv[])
 {
     printf("\n");
 
-    system("socat -dd PTY,link=/dev/ttyS10,mode=777 PTY,link=/dev/emulatorTx,mode=777 &");
+    system("socat -dd PTY,link=../serial_ports/ttyS10,mode=777 PTY,link=../serial_ports/emulatorTx,mode=777 &");
     sleep(1);
     printf("\n");
 
-    system("socat -dd PTY,link=/dev/ttyS11,mode=777 PTY,link=/dev/emulatorRx,mode=777 &");
+    system("socat -dd PTY,link=../serial_ports/ttyS11,mode=777 PTY,link=../serial_ports/emulatorRx,mode=777 &");
     sleep(1);
 
     printf("\n\n"
-           "Transmitter must open /dev/ttyS10\n"
-           "Receiver must open /dev/ttyS11\n"
+           "Transmitter must open ../serial_ports/ttyS10\n"
+           "Receiver must open ../serial_ports/ttyS11\n"
            "\n"
            "The cable program is sensible to the following interactive commands:\n"
            "--- on           : connect the cable and data is exchanged (default state)\n"
@@ -88,7 +88,7 @@ int main(int argc, char *argv[])
     struct termios oldtioTx;
     struct termios newtioTx;
 
-    int fdTx = openSerialPort("/dev/emulatorTx", &oldtioTx, &newtioTx);
+    int fdTx = openSerialPort("../serial_ports/emulatorTx", &oldtioTx, &newtioTx);
 
     if (fdTx < 0)
     {
@@ -99,7 +99,7 @@ int main(int argc, char *argv[])
     struct termios oldtioRx;
     struct termios newtioRx;
 
-    int fdRx = openSerialPort("/dev/emulatorRx", &oldtioRx, &newtioRx);
+    int fdRx = openSerialPort("../serial_ports/emulatorRx", &oldtioRx, &newtioRx);
 
     if (fdRx < 0)
     {

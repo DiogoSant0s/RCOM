@@ -5,3 +5,4 @@ penguin-received.gif
 .DS_Store
 Makefile
 cable/cable.c
+.vscode

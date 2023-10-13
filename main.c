@@ -18,7 +18,7 @@ int main(int argc, char *argv[])
 {
     if (argc < 4)
     {
-        printf("Usage: %s /dev/ttySxx tx|rx filename\n", argv[0]);
+        printf("Usage: %s ../serial_ports/ttySxx tx|rx filename\n", argv[0]);
         exit(1);
     }
 
