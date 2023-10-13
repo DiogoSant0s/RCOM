@@ -1,2 +1,7 @@
 penguin-received.gif
 *.o
+
+# MacOS
+.DS_Store
+Makefile
+cable/cable.c
