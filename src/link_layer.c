@@ -88,7 +88,7 @@ int sendSupervisionFrame(unsigned char a, unsigned char c) {
     frame[3] = a ^ c;
     frame[4] = FLAG;
 
-    ssize_t bytes = write(fd, frame, sizeof(frame));
+    size_t bytes = write(fd, frame, sizeof(frame));
 
     if (bytes == -1) {
         perror("Error writing to serial port");
@@ -116,7 +116,7 @@ int initiateCommunicationTransmiter() {
 
         // Wait for incoming data
         unsigned char receivedByte;
-        ssize_t bytesRead = read(fd, &receivedByte, 1);
+        size_t bytesRead = read(fd, &receivedByte, 1);
 
         if (bytesRead == -1) {
             perror("Error reading from serial port");
@@ -148,7 +148,7 @@ int initiateCommunicationReciver() {
     while (CYCLE_STOP == FALSE) {
         // Wait for incoming data
         unsigned char receivedByte;
-        ssize_t bytesRead = read(fd, &receivedByte, 1);
+        size_t bytesRead = read(fd, &receivedByte, 1);
 
         if (bytesRead == -1) {
             perror("Error reading from serial port");
