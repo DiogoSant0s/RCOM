@@ -29,14 +29,31 @@
 #define C_INF1  0x40
 
 LinkLayer layer;
-
+int fd;
 struct termios oldtio;
 struct termios newtio;
 
-volatile int STOP = FALSE;
+volatile int CYCLE_STOP = FALSE;
 
 int alarmEnabled = FALSE;
 int alarmCount = 0;
+
+typedef enum {
+    START,
+    STOP,
+    BCC_OK,
+    FLAG_OK,
+
+    // Receiver
+    A_RCV,
+    C_RCV,
+
+    // Transmitter
+    A_TX,
+    C_TX,
+} State;
+
+State currentState = START;
 
 ////////////////////////////////////////////////
 // Auxiliary functions
@@ -62,17 +79,189 @@ void alarmHandler(int signal)
 }
 
 // Send supervision buffer
-int sendSupervisionBuffer(unsigned char a, unsigned char c) {
-    // Create string to send
-    unsigned char buffer[5];
+int sendSupervisionFrame(unsigned char a, unsigned char c) {
+    unsigned char frame[5];
 
-    buffer[0] = FLAG;
-    buffer[1] = a;
-    buffer[2] = c;
-    buffer[3] = a ^ c;
-    buffer[4] = FLAG;
+    frame[0] = FLAG;
+    frame[1] = a;
+    frame[2] = c;
+    frame[3] = a ^ c;
+    frame[4] = FLAG;
 
-    return write(fd, buffer, sizeof(buffer));
+    ssize_t bytes = write(fd, frame, sizeof(frame));
+
+    if (bytes == -1) {
+        perror("Error writing to serial port");
+        return -1;
+    } 
+    else if (bytes != sizeof(frame)) {
+        perror("Partial write to serial port");
+        return -1;
+    }
+
+    return 0;
+}
+
+// 
+int initiateCommunicationTransmiter() {
+    // Loop for input
+    while (CYCLE_STOP == FALSE && alarmCount < layer.nRetransmissions) {
+        if (alarmEnabled == FALSE) {
+            // Send SET
+            int bytes = sendSupervisionBuffer(A_T, C_SET);
+            
+            alarmEnabled = TRUE;
+            alarm(layer.timeout);
+        }
+
+        // Wait for incoming data
+        unsigned char receivedByte;
+        ssize_t bytesRead = read(fd, &receivedByte, 1);
+
+        if (bytesRead == -1) {
+            perror("Error reading from serial port");
+            return -1;
+        }
+        else if (bytesRead == 0) {
+            continue;
+        }
+
+        if (stateMachine(receivedByte) == -1) {
+            return -1;
+        }
+        if (currentState == STOP) {
+            CYCLE_STOP = TRUE;
+        }
+    }
+
+    // Timeout
+    if (alarmCount == layer.nRetransmissions) {
+        printf("Time Out\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+int initiateCommunicationReciver() {
+    // Wait for incoming data
+    while (CYCLE_STOP == FALSE) {
+        // Wait for incoming data
+        unsigned char receivedByte;
+        ssize_t bytesRead = read(fd, &receivedByte, 1);
+
+        if (bytesRead == -1) {
+            perror("Error reading from serial port");
+            return -1;
+        }
+        else if (bytesRead == 0) {
+            continue;
+        }
+
+        if (stateMachine(receivedByte) == -1) {
+            return -1;
+        }
+        if (currentState == STOP) {
+            CYCLE_STOP = TRUE;
+        }
+    }
+
+    if (sendSupervisionFrame(A_R, C_UA) == -1) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int stateMachine(unsigned char receivedByte) {
+
+    switch (currentState) {
+        case START:
+            if (receivedByte == FLAG) {
+                currentState = FLAG_OK;
+            }
+            break;
+
+        // SET State Machine
+        case FLAG_OK:
+            if (receivedByte == A_T) {
+                currentState = A_RCV;
+            }
+            else if (receivedByte == A_R) {
+                currentState = A_TX;
+            }
+            else if (receivedByte == FLAG) {
+                currentState = FLAG_OK;
+            }
+            else {
+                currentState = START;
+            }
+            break; 
+
+        // SET State Machine
+        case A_RCV:
+            if (receivedByte == C_SET) {
+                currentState = C_RCV;
+            }
+            else if (receivedByte == FLAG) {
+                currentState = FLAG_OK;
+            }
+            else {
+                currentState = START;
+            }
+            break;
+
+        case C_RCV:
+            if (receivedByte == BCC(A_T, C_SET)) {
+                currentState = BCC_OK;
+            }
+            else if (receivedByte == FLAG) {
+                currentState = FLAG_OK;
+            }
+            else {
+                currentState = START;
+            }
+            break;
+
+        // UA State Machine
+        case A_TX:
+            if (receivedByte == C_UA) {
+                currentState = C_TX;
+            }
+            else if (receivedByte == FLAG) {
+                currentState = FLAG_OK;
+            }
+            else {
+                currentState = START;
+            }
+            break;
+        
+        case C_TX:
+            if (receivedByte == BCC(A_R, C_UA)) {
+                currentState = BCC_OK;
+            }
+            else if (receivedByte == FLAG) {
+                currentState = FLAG_OK;
+            }
+            else {
+                currentState = START;
+            }
+            break;
+
+        case BCC_OK:
+            if (receivedByte == FLAG) {
+                currentState = STOP;
+            }
+            else {
+                currentState = START;
+            }
+            break;
+    
+        default:
+            break;
+    }
+    
+    return 0;
 }
 
 ////////////////////////////////////////////////
@@ -85,8 +274,7 @@ int llopen(LinkLayer connectionParameters) {
 
     layer = connectionParameters;
 
-    int fd = open(layer.serialPort, O_RDWR | O_NOCTTY);
-
+    fd = open(layer.serialPort, O_RDWR | O_NOCTTY);
     if (fd < 0) {
         perror(layer.serialPort);
         exit(-1);
@@ -131,28 +319,22 @@ int llopen(LinkLayer connectionParameters) {
     printf("New termios structure set\n");
 
     if (layer.role == LlTx) {
-
-        // Loop for input
-        while (STOP == FALSE && alarmCount < layer.nRetransmissions) {
-            if (alarmEnabled == FALSE) {
-                // Send SET
-                int bytes = sen;
-
-                alarmEnabled = TRUE;
-                alarm(layer.timeout);
-            }
-
-            }
+        if (initiateCommunicationTransmiter() == -1) {
+            return -1;
         }
     }
     else if (layer.role == LlRx) {
+        if (initiateCommunicationReciver() == -1) {
+            return -1;
+        }
     }
     else {
         printf("Invalid role\n");
         exit(-1);
     }
 
-    return 1;
+    printf("Connection established\n");
+    return 0;
 }
 
 ////////////////////////////////////////////////
