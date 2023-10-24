@@ -13,20 +13,27 @@
 
 // Supervision Buffer's
 #define FLAG    0x7E
-#define A_T     0x01
-#define A_R     0x03
-#define C_SET   0x03
-#define C_UA    0x07
-#define C_RR0   0x05
-#define C_RR1   0x85
-#define C_REJ0  0x01
-#define C_REJ1  0x81
-#define C_DISC  0x0B
+
+#define A_T     0x01    // Sent by Transmitter
+#define A_R     0x03    // Sent by Receiver
+
+#define C_INF0  0x00    // Information Frame 0
+#define C_INF1  0x40    // Information Frame 1
+
+#define C_SET   0x03    // Set Up
+#define C_UA    0x07    // Unnumbered Acknowledgement
+#define C_RR0   0x05    // Receiver Ready 0
+#define C_RR1   0x85    // Receiver Ready 1
+#define C_REJ0  0x01    // Reject 0
+#define C_REJ1  0x81    // Reject 1
+
+#define C_DISC  0x0B    // Disconnect
+
 #define BCC(a, c) (a^c) 
 
+#define ESCAPE 0x7D    // Escape character
+
 // Information Buffer's
-#define C_INF0  0x00
-#define C_INF1  0x40
 
 LinkLayer layer;
 int fd;
@@ -41,16 +48,29 @@ int alarmCount = 0;
 typedef enum {
     START,
     STOP,
-    BCC_OK,
     FLAG_OK,
 
-    // Receiver
-    A_RCV,
-    C_RCV,
-
-    // Transmitter
+    // Adress
     A_TX,
-    C_TX,
+    A_RCV,
+
+    // Connection
+    CONN_RCV,
+    CONN_TX,
+    
+    // Data Transmission
+    DATA_RCV,
+    DATA_RR_TX,
+    DATA_REJ_TX,
+    
+    // Connection Termination
+    CLOSE_RCV,
+    CLOSE_TX,
+
+    // Errors
+    BCC1_OK,
+    BCC2_OK,
+
 } State;
 
 State currentState = START;
@@ -126,7 +146,7 @@ int initiateCommunicationTransmiter() {
             continue;
         }
 
-        if (stateMachine(receivedByte) == -1) {
+        if (stateMachine(receivedByte, NULL, 0) == -1) {
             return -1;
         }
         if (currentState == STOP) {
@@ -158,7 +178,7 @@ int initiateCommunicationReciver() {
             continue;
         }
 
-        if (stateMachine(receivedByte) == -1) {
+        if (stateMachine(receivedByte, NULL, 0) == -1) {
             return -1;
         }
         if (currentState == STOP) {
@@ -173,7 +193,7 @@ int initiateCommunicationReciver() {
     return 0;
 }
 
-int stateMachine(unsigned char receivedByte) {
+int stateMachine(unsigned char receivedByte, unsigned char* data, int dataSize) {
 
     switch (currentState) {
         case START:
@@ -182,7 +202,6 @@ int stateMachine(unsigned char receivedByte) {
             }
             break;
 
-        // SET State Machine
         case FLAG_OK:
             if (receivedByte == A_T) {
                 currentState = A_RCV;
@@ -198,10 +217,16 @@ int stateMachine(unsigned char receivedByte) {
             }
             break; 
 
-        // SET State Machine
+        // Address
         case A_RCV:
-            if (receivedByte == C_SET) {
-                currentState = C_RCV;
+            if (receivedByte == C_INF0 || receivedByte == C_INF1) {
+                currentState = DATA_RCV;
+            }
+            else if (receivedByte == C_SET) {
+                currentState = CONN_RCV;
+            }
+            else if (receivedByte == C_DISC) {
+                currentState = CLOSE_RCV;
             }
             else if (receivedByte == FLAG) {
                 currentState = FLAG_OK;
@@ -211,22 +236,57 @@ int stateMachine(unsigned char receivedByte) {
             }
             break;
 
-        case C_RCV:
-            if (receivedByte == BCC(A_T, C_SET)) {
-                currentState = BCC_OK;
-            }
-            else if (receivedByte == FLAG) {
-                currentState = FLAG_OK;
-            }
-            else {
-                currentState = START;
-            }
-            break;
-
-        // UA State Machine
         case A_TX:
             if (receivedByte == C_UA) {
-                currentState = C_TX;
+                currentState = CONN_TX;
+            }
+            else if (receivedByte == C_RR0 || receivedByte == C_RR1) {
+                currentState = DATA_RR_TX;
+            }
+            else if (receivedByte == C_REJ0 || receivedByte == C_REJ1) {
+                currentState = DATA_REJ_TX;
+            }
+            else if (receivedByte == C_DISC) {
+                currentState = CLOSE_TX;
+            }
+            else if (receivedByte == FLAG) {
+                currentState = FLAG_OK;
+            }
+            else {
+                currentState = START;
+            }
+            break;
+
+        // Connection
+        case CONN_RCV:
+            if (receivedByte == BBC(A_T, C_SET)) {
+                currentState = BCC1_OK;
+            }
+            else if (receivedByte == FLAG) {
+                currentState = FLAG_OK;
+            }
+            else {
+                currentState = START;
+
+            }
+            break;
+        
+        case CONN_TX:
+            if (receivedByte == BCC(A_R, C_UA)) {
+                currentState = BCC1_OK;
+            }
+            else if (receivedByte == FLAG) {
+                currentState = FLAG_OK;
+            }
+            else { 
+                currentState = START;
+            }
+            break;
+
+        // Data Transmission
+        case DATA_RCV:
+            if (receivedByte == BCC2(data, dataSize) && data != NULL) {
+                currentState = BCC2_OK;
             }
             else if (receivedByte == FLAG) {
                 currentState = FLAG_OK;
@@ -236,9 +296,9 @@ int stateMachine(unsigned char receivedByte) {
             }
             break;
         
-        case C_TX:
-            if (receivedByte == BCC(A_R, C_UA)) {
-                currentState = BCC_OK;
+        case DATA_RR_TX:
+            if (receivedByte == BCC1(A_R, C_RR0) || receivedByte == BCC1(A_R, C_RR1)) {
+                currentState = BCC1_OK;
             }
             else if (receivedByte == FLAG) {
                 currentState = FLAG_OK;
@@ -248,7 +308,46 @@ int stateMachine(unsigned char receivedByte) {
             }
             break;
 
-        case BCC_OK:
+        case DATA_REJ_TX:
+            if (receivedByte == BCC1(A_R, C_REJ0) || receivedByte == BCC1(A_R, C_REJ1)) {
+                currentState = BCC1_OK;
+            }
+            else if (receivedByte == FLAG) {
+                currentState = FLAG_OK;
+            }
+            else {
+                currentState = START;
+            }
+            break;
+
+        // Connection Termination
+        case CLOSE_RCV:
+            if (receivedByte == BCC1(A_T, C_DISC)) {
+                currentState = BCC1_OK;
+            }
+            else if (receivedByte == FLAG) {
+                currentState = FLAG_OK;
+            }
+            else {
+                currentState = START;
+            }
+            break;
+
+        case CLOSE_TX:
+            if (receivedByte == BCC1(A_R, C_DISC)) {
+                currentState = BCC1_OK;
+            }
+            else if (receivedByte == FLAG) {
+                currentState = FLAG_OK;
+            }
+            else {
+                currentState = START;
+            }
+            break;
+        
+        // Errors
+        case BCC1_OK:
+        case BCC2_OK:
             if (receivedByte == FLAG) {
                 currentState = STOP;
             }
@@ -262,6 +361,23 @@ int stateMachine(unsigned char receivedByte) {
     }
     
     return 0;
+}
+
+void byteStuff(const unsigned char* data, int dataSize, unsigned char* stuffedData, int* stuffedSize) {
+    int i, j;
+
+    for (i = 0, j = 0; i < dataSize; i++) {
+        if (data[i] == FLAG || data[i] == ESCAPE) {
+            // If data contains FLAG or ESC, stuff it
+            stuffedData[j++] = ESCAPE;
+            stuffedData[j++] = data[i] ^ 0x20;  // Toggle the 5th bit
+        } 
+        else {
+            stuffedData[j++] = data[i];
+        }
+    }
+
+    *stuffedSize = j;
 }
 
 ////////////////////////////////////////////////
@@ -330,7 +446,7 @@ int llopen(LinkLayer connectionParameters) {
     }
     else {
         printf("Invalid role\n");
-        exit(-1);
+        return -1;
     }
 
     printf("Connection established\n");
@@ -341,9 +457,60 @@ int llopen(LinkLayer connectionParameters) {
 // LLWRITE
 ////////////////////////////////////////////////
 int llwrite(const unsigned char *buf, int bufSize) {
-    // TODO
 
-    return 0;
+    unsigned char frame[bufSize + 6];
+
+    // Frame
+    frame[0] = FLAG;                            // Start Flag
+    frame[1] = A_T;                             // Address
+    frame[2] = C_INF0;                          // Control Field
+    frame[3] = BCC(A_T, C_INF0);                // BCC calculation
+    memcpy(frame + 4, buf, bufSize);            // Copy data payload
+    frame[4 + bufSize] = BCC2(buf, bufSize);    // BCC2
+    frame[5 + bufSize] = FLAG;                  // End Flag
+
+    // Stuffing
+    unsigned char stuffedFrame[2 * (bufSize + 6)];
+    int stuffedFrameSize;
+    byteStuff(frame, bufSize + 6, stuffedFrame, &stuffedFrameSize);
+
+    // Send frame
+    CYCLE_STOP = FALSE;
+    alarmEnabled = FALSE;
+    currentState = START;
+    ssize_t bytesRead = 0;
+
+    while (CYCLE_STOP == FALSE && alarmCount < layer.nRetransmissions) {
+        if (alarmEnabled == FALSE) {
+            // Send frame
+            int bytes = write(fd, stuffedFrame, stuffedFrameSize);
+
+            alarm(layer.timeout); // Set alarm to be triggered
+            alarmEnabled = TRUE;
+        }
+
+        // Wait for incoming data
+        unsigned char receivedByte;
+        bytesRead = read(fd, &receivedByte, 1);
+
+        if (bytesRead == -1) {
+            perror("Error reading from serial port");
+            return -1;
+        }
+        else if (bytesRead == 0) {
+            continue;
+        }
+
+        // State Machine
+        if (stateMachine(receivedByte, stuffedFrame, stuffedFrameSize) == -1) {
+            return -1;
+        }
+        if (currentState == STOP) {
+            CYCLE_STOP = TRUE;
+        }
+    }
+    
+    return bytesRead;
 }
 
 ////////////////////////////////////////////////
