@@ -29,7 +29,7 @@
 
 #define C_DISC  0x0B    // Disconnect
 
-#define BCC(a, c) (a^c) 
+#define BCC1(a, c) (a^c) 
 
 #define ESCAPE 0x7D    // Escape character
 
@@ -259,7 +259,7 @@ int stateMachine(unsigned char receivedByte, unsigned char* data, int dataSize) 
 
         // Connection
         case CONN_RCV:
-            if (receivedByte == BBC(A_T, C_SET)) {
+            if (receivedByte == BBC1(A_T, C_SET)) {
                 currentState = BCC1_OK;
             }
             else if (receivedByte == FLAG) {
@@ -272,7 +272,7 @@ int stateMachine(unsigned char receivedByte, unsigned char* data, int dataSize) 
             break;
         
         case CONN_TX:
-            if (receivedByte == BCC(A_R, C_UA)) {
+            if (receivedByte == BCC1(A_R, C_UA)) {
                 currentState = BCC1_OK;
             }
             else if (receivedByte == FLAG) {
@@ -285,8 +285,8 @@ int stateMachine(unsigned char receivedByte, unsigned char* data, int dataSize) 
 
         // Data Transmission
         case DATA_RCV:
-            if (receivedByte == BCC2(data, dataSize) && data != NULL) {
-                currentState = BCC2_OK;
+            if (receivedByte == BCC1(A_T, C_INF0) || receivedByte == BCC1(A_T, C_INF1)) {
+                currentState = BCC1_OK;
             }
             else if (receivedByte == FLAG) {
                 currentState = FLAG_OK;
@@ -347,6 +347,14 @@ int stateMachine(unsigned char receivedByte, unsigned char* data, int dataSize) 
         
         // Errors
         case BCC1_OK:
+            if (receivedByte == FLAG) {
+                currentState = STOP;
+            }
+            else if (receivedByte == BCC2(data, dataSize) && data != NULL) {
+                currentState = BCC2_OK;
+            }
+            break;
+
         case BCC2_OK:
             if (receivedByte == FLAG) {
                 currentState = STOP;
@@ -379,6 +387,23 @@ void byteStuff(const unsigned char* data, int dataSize, unsigned char* stuffedDa
 
     *stuffedSize = j;
 }
+
+void byteDestuff(const unsigned char* stuffedData, int stuffedSize, unsigned char* destuffedData, int* destuffedSize) {
+    int i, j;
+
+    for (i = 0, j = 0; i < stuffedSize; i++) {
+        if (stuffedData[i] == ESCAPE) {
+            // If an escape character is encountered, unstuff it
+            destuffedData[j++] = stuffedData[++i] ^ 0x20;  // Toggle the 5th bit and store the original byte
+        } 
+        else {
+            destuffedData[j++] = stuffedData[i];
+        }
+    }
+
+    *destuffedSize = j;
+}
+
 
 ////////////////////////////////////////////////
 // LLOPEN
@@ -464,7 +489,7 @@ int llwrite(const unsigned char *buf, int bufSize) {
     frame[0] = FLAG;                            // Start Flag
     frame[1] = A_T;                             // Address
     frame[2] = C_INF0;                          // Control Field
-    frame[3] = BCC(A_T, C_INF0);                // BCC calculation
+    frame[3] = BCC1(A_T, C_INF0);               // BCC calculation
     memcpy(frame + 4, buf, bufSize);            // Copy data payload
     frame[4 + bufSize] = BCC2(buf, bufSize);    // BCC2
     frame[5 + bufSize] = FLAG;                  // End Flag
@@ -509,7 +534,7 @@ int llwrite(const unsigned char *buf, int bufSize) {
             CYCLE_STOP = TRUE;
         }
     }
-    
+
     return bytesRead;
 }
 
@@ -517,16 +542,101 @@ int llwrite(const unsigned char *buf, int bufSize) {
 // LLREAD
 ////////////////////////////////////////////////
 int llread(unsigned char *packet) {
-    // TODO
 
-    return 0;
+    ssize_t totalRead = 0;
+    CYCLE_STOP = FALSE;
+    currentState = START;
+
+    while (CYCLE_STOP == FALSE) {
+        // Wait for incoming data
+        unsigned char receivedByte;
+        ssize_t bytesRead = read(fd, &receivedByte, 1);
+
+        if (bytesRead == -1) {
+            perror("Error reading from serial port");
+            return -1;
+        }
+        else if (bytesRead == 0) {
+            continue;
+        }
+        totalRead += bytesRead;
+
+        if (stateMachine(receivedByte, NULL, 0) == -1) {
+            return -1;
+        }
+        if (currentState == STOP) {
+            CYCLE_STOP = TRUE;
+        }
+    }
+
+    // Unstuffing
+    unsigned char destuffedFrame[totalRead];
+    int destuffedFrameSize;
+
+    byteDestuff(packet, totalRead, destuffedFrame, &destuffedFrameSize);
+
+    static int lastReceivedSequence = -1;
+    int receivedSequence = (destuffedFrame[2] & 0x40) >> 6;
+
+
+    // Check duplicate
+    if (receivedSequence == lastReceivedSequence) {
+        if (receivedSequence == 0) {
+            sendSupervisionFrame(A_R, C_RR0);
+        } 
+        else if (receivedSequence == 1) {
+            sendSupervisionFrame(A_R, C_RR1);
+        }
+        return 0;
+    }
+
+    // Check BCC1
+    if (destuffedFrame[3] != BCC1(A_R, destuffedFrame[2])) {
+        // Send REJ
+        if (destuffedFrame[2] == C_INF0) {
+            sendSupervisionFrame(A_R, C_REJ0);
+        }
+        if (destuffedFrame[2] == C_INF1) {
+            sendSupervisionFrame(A_R, C_REJ1);
+        }
+        return -1;
+    }
+
+    // Check BCC2
+    if (destuffedFrame[destuffedFrameSize - 2] != BCC2(destuffedFrame + 4, destuffedFrameSize - 6)) {
+        // Send REJ
+        if (destuffedFrame[2] == C_INF0) {
+            sendSupervisionFrame(A_R, C_REJ0);
+        }
+        else if (destuffedFrame[2] == C_INF1) {
+            sendSupervisionFrame(A_R, C_REJ1);
+        }
+        return -1;
+    }
+
+    // Send RR
+    if (destuffedFrame[2] == C_INF0) {
+        sendSupervisionFrame(A_R, C_RR0);
+    }
+    else if (destuffedFrame[2] == C_INF1) {
+        sendSupervisionFrame(A_R, C_RR1);
+    }
+
+    lastReceivedSequence = receivedSequence;
+
+    // Copy data payload
+    memcpy(packet, destuffedFrame + 4, destuffedFrameSize - 6);
+
+    // Return data payload size
+    return destuffedFrameSize - 6;
+
+
 }
 
 ////////////////////////////////////////////////
 // LLCLOSE
 ////////////////////////////////////////////////
 int llclose(int showStatistics) {
-    // TODO
 
     return 1;
 }
