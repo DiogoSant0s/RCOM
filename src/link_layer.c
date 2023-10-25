@@ -638,5 +638,127 @@ int llread(unsigned char *packet) {
 ////////////////////////////////////////////////
 int llclose(int showStatistics) {
 
-    return 1;
+    CYCLE_STOP = FALSE;
+    alarmEnabled = FALSE;
+    alarmCount = 0;
+
+    currentState = START;
+
+    // Transmitter
+    if (layer.role == LlTx) {
+
+        while (CYCLE_STOP == FALSE && alarmCount < layer.nRetransmissions) {
+            if (alarmEnabled == FALSE) {
+                // Send DISC
+                ssize_t bytes = sendSupervisionFrame(A_T, C_DISC);
+
+                alarm(layer.timeout);
+                alarmEnabled = TRUE;
+            }
+
+            // Wait for incoming data
+            unsigned char receivedByte;
+            ssize_t bytesRead = read(fd, &receivedByte, 1);
+
+            if (bytesRead == -1) {
+                perror("Error reading from serial port");
+                return -1;
+            }
+            else if (bytesRead == 0) {
+                continue;
+            }
+
+            if (stateMachine(receivedByte, NULL, 0) == -1) {
+                return -1;
+            }
+            if (currentState == STOP) {
+                CYCLE_STOP = TRUE;
+            }
+        }
+        
+        if (alarmCount == layer.nRetransmissions) {
+            printf("Time Out\n");
+            return -1;
+        }
+
+        // Send UA
+        if (sendSupervisionFrame(A_T, C_UA) == -1) {
+            return -1;
+        }
+    }
+    // Receiver
+    else if (layer.role == LlRx) {
+
+        // Receive DISC
+        while (CYCLE_STOP == FALSE) {
+            // Wait for incoming data
+            unsigned char receivedByte;
+            ssize_t bytesRead = read(fd, &receivedByte, 1);
+
+            if (bytesRead == -1) {
+                perror("Error reading from serial port");
+                return -1;
+            }
+            else if (bytesRead == 0) {
+                continue;
+            }
+
+            if (stateMachine(receivedByte, NULL, 0) == -1) {
+                return -1;
+            }
+            if (currentState == STOP) {
+                CYCLE_STOP = TRUE;
+            }
+        }
+
+        // Send DISC
+        if (sendSupervisionFrame(A_R, C_DISC) == -1) {
+            return -1;
+        }
+
+        // Receive UA
+        while (CYCLE_STOP == FALSE) {
+            // Wait for incoming data
+            unsigned char receivedByte;
+            ssize_t bytesRead = read(fd, &receivedByte, 1);
+
+            if (bytesRead == -1) {
+                perror("Error reading from serial port");
+                return -1;
+            }
+            else if (bytesRead == 0) {
+                continue;
+            }
+
+            if (stateMachine(receivedByte, NULL, 0) == -1) {
+                return -1;
+            }
+            if (currentState == STOP) {
+                CYCLE_STOP = TRUE;
+            }
+        }
+    }
+    else {
+        printf("Invalid role\n");
+        return -1;
+    }
+
+    // Restore old port settings
+    if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
+    {
+        perror("tcsetattr");
+        exit(-1);
+    }
+
+    printf("Old termios structure restored\n");
+
+    // Close serial port
+    if (close(fd) == -1) {
+        perror("Error closing serial port");
+        return -1;
+    }
+
+    printf("Serial port closed\n");
+
+    return 0;
 }
