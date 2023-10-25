@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
@@ -58,7 +59,10 @@ State currentState = START;
 ////////////////////////////////////////////////
 // Auxiliary functions
 ////////////////////////////////////////////////
-// Calculate BCC2
+/// @brief Calculate BCC2
+/// @param buffer
+/// @param length
+/// @return BCC2
 unsigned char BCC2(unsigned char *buffer, int length) {
     unsigned char bcc = 0x00;
 
@@ -69,7 +73,8 @@ unsigned char BCC2(unsigned char *buffer, int length) {
     return bcc;
 }
 
-// Alarm function handler
+/// @brief Alarm function handler
+/// @param signal
 void alarmHandler(int signal)
 {
     alarmEnabled = FALSE;
@@ -78,7 +83,10 @@ void alarmHandler(int signal)
     printf("Alarm #%d\n", alarmCount);
 }
 
-// Send supervision buffer
+/// @brief Send supervision buffer
+/// @param a
+/// @param c
+/// @return Return "0" on success or "-1" on error.
 int sendSupervisionFrame(unsigned char a, unsigned char c) {
     unsigned char frame[5];
 
@@ -102,7 +110,8 @@ int sendSupervisionFrame(unsigned char a, unsigned char c) {
     return 0;
 }
 
-// 
+/// @brief 
+/// @return Return "0" on success or "-1" on error.
 int initiateCommunicationTransmiter() {
     // Loop for input
     while (CYCLE_STOP == FALSE && alarmCount < layer.nRetransmissions) {
@@ -143,6 +152,8 @@ int initiateCommunicationTransmiter() {
     return 0;
 }
 
+/// @brief 
+/// @return Return "0" on success or "-1" on error.
 int initiateCommunicationReciver() {
     // Wait for incoming data
     while (CYCLE_STOP == FALSE) {
@@ -173,6 +184,9 @@ int initiateCommunicationReciver() {
     return 0;
 }
 
+/// @brief 
+/// @param receivedByte
+/// @return Return "0" on success or "-1" on error.
 int stateMachine(unsigned char receivedByte) {
 
     switch (currentState) {
@@ -281,8 +295,7 @@ int llopen(LinkLayer connectionParameters) {
     }
 
     // Save current port settings
-    if (tcgetattr(fd, &oldtio) == -1)
-    {
+    if (tcgetattr(fd, &oldtio) == -1) {
         perror("tcgetattr");
         exit(-1);
     }
@@ -310,8 +323,7 @@ int llopen(LinkLayer connectionParameters) {
     tcflush(fd, TCIOFLUSH);
 
     // Set new port settings
-    if (tcsetattr(fd, TCSANOW, &newtio) == -1)
-    {
+    if (tcsetattr(fd, TCSANOW, &newtio) == -1) {
         perror("tcsetattr");
         exit(-1);
     }
@@ -330,11 +342,11 @@ int llopen(LinkLayer connectionParameters) {
     }
     else {
         printf("Invalid role\n");
-        exit(-1);
+        return -1;
     }
 
     printf("Connection established\n");
-    return 0;
+    return 1;
 }
 
 ////////////////////////////////////////////////
