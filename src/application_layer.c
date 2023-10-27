@@ -23,7 +23,6 @@
 #define FILE_SIZE 0
 #define FILE_NAME 1
 
-#define MAX_PACKET_SIZE 1000
 #define MAX_BUFFER_SIZE (MAX_PACKET_SIZE * 2 + 7)
 
 
@@ -67,16 +66,16 @@ int TransmitterApp(const char *filename) {
     
     // Middle packets
     unsigned sequenceNumber = 0;
-    unsigned char buf[MAX_PACKET_SIZE];
+    unsigned packetsSent = 1;
+    unsigned char buf[MAX_PAYLOAD_SIZE];
 
     while (TRUE) {
         // Read data from the file
-        unsigned bytes_to_send = fread(buf, sizeof(unsigned char), MAX_PACKET_SIZE - 4, file);
+        unsigned bytes_to_send = fread(buf, sizeof(unsigned char), MAX_PAYLOAD_SIZE - 4, file);
 
         // Create the data packet
-        unsigned int packet_size = 4 + bytes_to_send;  // Data packet size
-
-        unsigned char dataPacket[packet_size];
+        unsigned int dataPacketSize = 4 + bytes_to_send;  // Data packet size
+        unsigned char dataPacket[dataPacketSize];         // Data packet
         dataPacket[0] = MIDDLE_PACKET;                  // Control field for data
         dataPacket[1] = sequenceNumber;                 // Sequence number (0 or 1)
         dataPacket[2] = (bytes_to_send >> 8) & 0xFF;    // High byte of size
@@ -84,17 +83,22 @@ int TransmitterApp(const char *filename) {
         memcpy(&dataPacket[4], buf, bytes_to_send);     // Copy data into the packet
 
         // Send the data packet
-        if (llwrite(dataPacket, packet_size) == -1) {
+        if (llwrite(dataPacket, dataPacketSize) == -1) {
             printf("Error sending data packet.\n");
             return -1;
         }
 
-        printf("Sent %dº data packet\n", sequenceNumber);
+        printf("%dº data packet sent\n", packetsSent++);
+        // Print packet
+        // for (int i = 0; i < dataPacketSize; i++) {
+        //     printf("Send Packet Byte %d: 0x%02X\n", i, dataPacket[i]);              // Remove
+        // }
+        // printf("\n");
 
         sequenceNumber = 1 - sequenceNumber;  // Toggle sequence number (0 or 1)
 
         // If no more data to read, break from the loop
-        if (bytes_to_send < (MAX_PACKET_SIZE - 4)) {
+        if (bytes_to_send < (MAX_PAYLOAD_SIZE - 4)) {
             break;
         }
     }
@@ -102,6 +106,7 @@ int TransmitterApp(const char *filename) {
 
     // Ending packet
     packet[0] = ENDING_PACKET;
+
 
     if (llwrite(packet, packet_size) == -1) {
         printf("Error sending ending packet.\n");
@@ -129,18 +134,25 @@ int ReceiverApp(const char *filename) {
     FILE *file;
     unsigned int sequenceNumber = 0; // TODO
     unsigned int totalBytesReceived = 0;
-    unsigned char dataPacket[MAX_PACKET_SIZE];
+    unsigned int packetsReceived = 0;
+    unsigned char dataPacket[MAX_PAYLOAD_SIZE];
 
     while (TRUE) {
         ssize_t bytesRead = llread(dataPacket);
         if (bytesRead == -1) {
-            printf("Error receiving data packet.\n");
+            printf("Error reading data packet.\n");
             fclose(file);
             return -1;
         }
         if (bytesRead == 0) {
             continue;
         }
+
+        // Print packet
+        // for (int i = 0; i < bytesRead; i++) {
+        //     printf("Received Packet Byte %d: 0x%02X\n", i, dataPacket[i]);                          // Remove
+        // }
+        // printf("\n");
 
         // 
         if (dataPacket[0] == STARTING_PACKET) {
@@ -149,6 +161,7 @@ int ReceiverApp(const char *filename) {
                 printf("Error opening file.\n");
                 return -1;
             }
+            printf("Received starting packet\n");
         }
         else if (dataPacket[0] == MIDDLE_PACKET) {
             // Write the data to the file
@@ -158,10 +171,11 @@ int ReceiverApp(const char *filename) {
                 fclose(file);
                 return -1;
             }
-            
+            printf("Received %dº data packet\n", packetsReceived++);
         }
         else if (dataPacket[0] == ENDING_PACKET) {
             fclose(file);
+            printf("Received ending packet\n");
             break;
         }
         else {
