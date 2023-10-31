@@ -6,7 +6,7 @@
 #define TRUE 1
 
 // Supervision Buffer's
-#define FLAG    0x7E
+#define FLAG    0x7E        // Flag
 
 #define A_R     0x01        // Sent by Receiver
 #define A_T     0x03        // Sent by Transmitter

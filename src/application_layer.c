@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 #include <time.h>
 
-//Packets
+// Packets
 #define MIDDLE_PACKET 1
 #define STARTING_PACKET 2
 #define ENDING_PACKET 3
@@ -29,7 +29,7 @@ int TransmitterApp(const char *filename) {
         return -1;
     }
 
-    // Starting packet (file size and name)
+    // Construct Starting packet (file size and name)
     unsigned int fileSize = sizeof(file_stat.st_size);       // Size of file
     unsigned int filenameSize = strlen(filename);            // Size of filename
     unsigned int packet_size = 5 + fileSize + filenameSize;  // Size of packet
@@ -43,12 +43,13 @@ int TransmitterApp(const char *filename) {
     packet[4 + fileSize] = filenameSize;
     memcpy(&packet[5 + fileSize], filename, filenameSize);
 
+    // Send the Starting packet
     if (llwrite(packet, packet_size) == -1) {
         printf("Error - Not possible to send starting packet\n");
         return -1;
     }
     
-    // Middle packets
+    // Send Middle packets
     unsigned sequenceNumber = 0;
     unsigned char buf[MAX_PAYLOAD_SIZE];
 
@@ -82,6 +83,7 @@ int TransmitterApp(const char *filename) {
     // Ending packet
     packet[0] = ENDING_PACKET;
 
+    // Send the Ending packet
     if (llwrite(packet, packet_size) == -1) {
         printf("Error - Not possible to send ending packet\n");
         return -1;
@@ -97,6 +99,7 @@ int ReceiverApp(const char *filename) {
     FILE *file;
     unsigned char dataPacket[MAX_PAYLOAD_SIZE + 4];
 
+    // Receive Packets
     while (TRUE) {
         ssize_t bytesRead = llread(dataPacket);
         if (bytesRead == -1) {

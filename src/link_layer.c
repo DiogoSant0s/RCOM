@@ -22,6 +22,7 @@ struct termios newtio;      // New Terminal I/O structure
 int initiateCommunicationTransmiter() {
     int alarmCount = 0;
 
+    // Will try to send SET nRetransmissions times
     while (alarmCount < layer.nRetransmissions) {
         // Send SET
         int bytes = sendSupervisionFrame(fd, A_T, C_SET);
@@ -87,16 +88,15 @@ int llopen(LinkLayer connectionParameters) {
     // Clear struct for new port settings
     memset(&newtio, 0, sizeof(newtio));
 
-    newtio.c_cflag = layer.baudRate | CS8 | CLOCAL | CREAD;
-    newtio.c_iflag = IGNPAR;
-    newtio.c_oflag = 0;
+    // Set new port settings
+    newtio.c_cflag = layer.baudRate | CS8 | CLOCAL | CREAD; // Set baudrate, 8 bits, no parity, 1 stop bit, ...
+    newtio.c_iflag = IGNPAR;                                // Ignore bytes with parity errors
+    newtio.c_oflag = 0;                                     // Raw output
+    newtio.c_lflag = 0;                                     // Raw input
+    newtio.c_cc[VTIME] = 0;                                 // Inter-character timer unused
+    newtio.c_cc[VMIN] = 0;                                  // Blocking read until 0 chars received
 
-    // Set input mode (non-canonical, no echo,...)
-    newtio.c_lflag = 0;
-    newtio.c_cc[VTIME] = 0; // Inter-character timer unused
-    newtio.c_cc[VMIN] = 0;  // Blocking read until 0 chars received
-
-    //   TCIFLUSH - flushes data received but not read.
+    // TCIFLUSH - flushes data received but not read.
     tcflush(fd, TCIOFLUSH);
 
     // Set new port settings
@@ -105,6 +105,7 @@ int llopen(LinkLayer connectionParameters) {
         return -1;
     }
 
+    // Initialize Connection
     if (layer.role == LlTx) {
         if (initiateCommunicationTransmiter() == -1) {
             return -1;
@@ -127,7 +128,7 @@ int llopen(LinkLayer connectionParameters) {
 // LLWRITE
 ////////////////////////////////////////////////
 int llwrite(const unsigned char *buf, int bufSize) {
-    static int lastSequence = 1;
+    static int lastSequence = 1; // First should be 0 so last is "1"
 
     // Stuff Data
     unsigned int stuffedDataSize = 2 * bufSize;
@@ -173,6 +174,7 @@ int llwrite(const unsigned char *buf, int bufSize) {
     // Send frame
     int alarmCount = 0;
 
+    // Will try to send frame nRetransmissions times
     while (alarmCount < layer.nRetransmissions) {
         // Send frame
         int bytes = write(fd, frame, frameSize);
@@ -185,6 +187,7 @@ int llwrite(const unsigned char *buf, int bufSize) {
             return -1;
         }
 
+        // Receive RR
         unsigned char frame[5];
         if (readFrame(fd, layer.timeout, frame) != -1) {
             // Verify BCC1
@@ -204,7 +207,7 @@ int llwrite(const unsigned char *buf, int bufSize) {
 ////////////////////////////////////////////////
 int llread(unsigned char *packet) {
 
-    unsigned char stuffedFrame[2 * (MAX_PAYLOAD_SIZE + 1) + 5];
+    unsigned char stuffedFrame[2 * (MAX_PAYLOAD_SIZE + 1) + 5]; // Allocate memory for stuffed frame
     unsigned int stuffedFrameSize = 0;
 
     // Read frame
@@ -229,17 +232,25 @@ int llread(unsigned char *packet) {
     memcpy(frame + 4, data, dataSize);                         // Copy data + BCC2
     frame[frameSize - 1] = stuffedFrame[stuffedFrameSize - 1]; // End Flag
 
-    static int lastReceivedSequence = -1;
-    int receivedSequence = (frame[2] & 0x40) >> 6;
+    static int lastReceivedSequence = -1;           // 0 or 1 
+    int receivedSequence = (frame[2] & 0x40) >> 6;  // Gets 7th bit
 
     // Check duplicate
     if (receivedSequence == lastReceivedSequence) {
         printf("ERROR - Received duplicated frame\n");
         if (receivedSequence == 0) {
-            sendSupervisionFrame(fd, A_R, C_RR0);
+            // Send RR0
+            if (sendSupervisionFrame(fd, A_R, C_RR0) == -1) {
+                printf("ERROR - Not possible to send RR0\n");
+                return -1;
+            }   
         } 
         else if (receivedSequence == 1) {
-            sendSupervisionFrame(fd, A_R, C_RR1);
+            // Send RR1
+            if (sendSupervisionFrame(fd, A_R, C_RR1) == -1) {
+                printf("ERROR - Not possible to send RR1\n");
+                return -1;
+            }
         }
         return 0;
     }
@@ -247,12 +258,19 @@ int llread(unsigned char *packet) {
     // Check BCC1
     if (frame[3] != BCC1(A_T, frame[2])) {
         printf("ERROR - BCC1 failed - (Received: 0x%x \t Expected: 0x%x)\n", frame[3], BCC2(A_T, frame[2]));
-        // Send REJ
         if (frame[2] == C_INF0) {
-            sendSupervisionFrame(fd, A_T, C_REJ0);
+            // Send REJ0
+            if (sendSupervisionFrame(fd, A_T, C_REJ0) == -1) {
+                printf("ERROR - Not possible to send REJ0\n");
+                return -1;
+            }
         }
         if (frame[2] == C_INF1) {
-            sendSupervisionFrame(fd, A_T, C_REJ1);
+            // Send REJ1
+            if (sendSupervisionFrame(fd, A_T, C_REJ1) == -1) {
+                printf("ERROR - Not possible to send REJ1\n");
+                return -1;
+            }
         }
         return -1;
     }
@@ -260,25 +278,38 @@ int llread(unsigned char *packet) {
     // Check BCC2
     if (frame[frameSize - 2] != BCC2(data, dataSize - 1)) {
         printf("ERROR - BCC2 failed - (Received: 0x%x \t Expected: 0x%x)\n", frame[frameSize - 2], BCC2(data, dataSize));
-        // Send REJ
         if (frame[2] == C_INF0) {
-            sendSupervisionFrame(fd, A_T, C_REJ0);
+            // Send REJ0
+            if (sendSupervisionFrame(fd, A_T, C_REJ0) == -1) {
+                printf("ERROR - Not possible to send REJ0\n");
+                return -1;
+            }
         }
         else if (frame[2] == C_INF1) {
-            sendSupervisionFrame(fd, A_T, C_REJ1);
+            // Send REJ1
+            if (sendSupervisionFrame(fd, A_T, C_REJ1) == -1) {
+                printf("ERROR - Not possible to send REJ1\n");
+                return -1;
+            }
         }
         return -1;
     }
 
-    // Send RR
+    // Send RR0 or RR1
     if (frame[2] == C_INF0) {
-        sendSupervisionFrame(fd, A_R, C_RR0);
+        if (sendSupervisionFrame(fd, A_R, C_RR0) == -1) {
+            printf("ERROR - Not possible to send RR0\n");
+            return -1;
+        }
     }
     else if (frame[2] == C_INF1) {
-        sendSupervisionFrame(fd, A_R, C_RR1);
+        if (sendSupervisionFrame(fd, A_R, C_RR1) == -1) {
+            printf("ERROR - Not possible to send RR1\n");
+            return -1;
+        }
     }
 
-    lastReceivedSequence = receivedSequence;
+    lastReceivedSequence = receivedSequence; // Update last received sequence
 
     // Copy data payload
     memcpy(packet, data, dataSize - 1);
@@ -293,6 +324,7 @@ int llread(unsigned char *packet) {
 int terminateCommunicationTransmitter() {
     int alarmCount = 0;
 
+    // Will try to send DISC nRetransmissions times
     while (alarmCount < layer.nRetransmissions) {
         // Send DISC
         if (sendSupervisionFrame(fd, A_T, C_DISC) == -1) {
