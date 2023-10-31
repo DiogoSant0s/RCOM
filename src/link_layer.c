@@ -1,5 +1,6 @@
-// Link layer protocol implementation
 #include "link_layer.h"
+
+#include "../include/utils.h"
 
 #include <fcntl.h>
 #include <termios.h>
@@ -7,9 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-#include "../include/utils.h"
-
 
 #define _POSIX_SOURCE 1     // POSIX compliant source
 

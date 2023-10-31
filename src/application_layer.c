@@ -1,18 +1,9 @@
-// Application layer protocol implementation
-
 #include "application_layer.h"
 #include "link_layer.h"
 
-#include <fcntl.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <sys/stat.h>
-#include <termios.h>
-#include <unistd.h>
-#include <signal.h>
-#include <string.h>
 #include <time.h>
 
 //Packets
@@ -22,10 +13,6 @@
 
 #define FILE_SIZE 0
 #define FILE_NAME 1
-
-#define MAX_BUFFER_SIZE (MAX_PACKET_SIZE * 2 + 7)
-
-
 
 int TransmitterApp(const char *filename) {
     
