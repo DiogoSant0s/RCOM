@@ -4,7 +4,6 @@
 #include "macros.h"
 
 extern int alarmEnabled;
-extern int alarmCount;
 
 void alarmHandler(int signal);
 

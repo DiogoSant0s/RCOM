@@ -1,9 +1,18 @@
 #include "../include/utils.h"
 
 #include "../include/macros.h"
+#include "../include/state_machine.h"
+#include "../include/alarm.h"
 
-#include "unistd.h"
-#include "stdio.h"
+#include <fcntl.h>
+#include <termios.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+State currentState = START;
+int alarmEnabled = TRUE;
 
 unsigned char BCC2(const unsigned char *buffer, int length) {
     unsigned char bcc = 0x00;
@@ -36,6 +45,72 @@ int sendSupervisionFrame(int fd, unsigned char a, unsigned char c) {
     }
 
     return 0;
+}
+
+int readSupervisionFrame(int fd, unsigned int timeout) {
+    // Ser alarm Handler
+    (void)signal(SIGALRM, alarmHandler);
+
+    // Turn on Alarm
+    if (timeout != 0) {
+        alarmEnabled = TRUE;
+        alarm(timeout);
+    }
+
+    currentState = START;
+
+    while (alarmEnabled) {
+        // Wait for incoming data
+        unsigned char receivedByte;
+        ssize_t bytesRead = read(fd, &receivedByte, 1);
+
+        if (bytesRead == -1) {
+            perror("Error reading from serial port");
+            return -1;
+        }
+        else if (bytesRead == 0) {
+            continue;
+        }
+        else {
+            stateMachine(receivedByte);
+
+            if (currentState == STOP) {
+                return 0;
+            }
+        }
+    }
+
+    return -1;
+}
+
+int readDataFrame(int fd, unsigned char* data) {
+
+    currentState = START;
+    int dataIndex = 0;
+
+    while (alarmEnabled) {
+        // Wait for incoming data
+        unsigned char receivedByte;
+        ssize_t bytesRead = read(fd, &receivedByte, 1);
+
+        if (bytesRead == -1) {
+            perror("Error reading from serial port");
+            return -1;
+        }
+        else if (bytesRead == 0) {
+            continue;
+        }
+        else {
+            data[dataIndex++] = receivedByte;
+            stateMachine(receivedByte);
+
+            if (currentState == STOP) {
+                return dataIndex;
+            }
+        }
+    }
+
+    return -1;
 }
 
 int stuffData(const unsigned char* data, int dataSize, unsigned char* stuffedData) {

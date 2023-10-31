@@ -8,9 +8,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "../include/state_machine.h"
 #include "../include/utils.h"
-#include "../include/alarm.h"
+
 
 #define _POSIX_SOURCE 1     // POSIX compliant source
 
@@ -18,82 +17,38 @@ LinkLayer layer;            // Link layer connection parameters
 int fd;                     // File descriptor for serial port
 struct termios oldtio;      // Old Terminal I/O structure
 struct termios newtio;      // New Terminal I/O structure
-State currentState = START; // State machine current state (External)
-int alarmEnabled = FALSE;   // Alarm flag (External)
-int alarmCount = 0;         // Alarm counter (External)
-
-
-volatile int CYCLE_STOP = FALSE;
-
 
 int initiateCommunicationTransmiter() {
-    // Loop for input
-    while (CYCLE_STOP == FALSE && alarmCount < layer.nRetransmissions) {
-        if (alarmEnabled == FALSE) {
-            // Send SET
-            int bytes = sendSupervisionFrame(fd, A_T, C_SET);
-            if (bytes == -1) {
-                printf("Error sending SET\n");
-                return -1;
-            }
-            
-            alarmEnabled = TRUE;
-            alarm(layer.timeout);
-        }
+    int alarmCount = 0;
 
-        // Wait for incoming data
-        unsigned char receivedByte;
-        ssize_t bytesRead = read(fd, &receivedByte, 1);
-
-        if (bytesRead == -1) {
-            perror("Error reading from serial port");
+    while (alarmCount < layer.nRetransmissions) {
+        // Send SET
+        int bytes = sendSupervisionFrame(fd, A_T, C_SET);
+        if (bytes == -1) {
+            printf("Error sending SET\n");
             return -1;
         }
-        else if (bytesRead == 0) {
-            continue;
+
+        if (readSupervisionFrame(fd, layer.timeout) == 0) {
+            return 0;
         }
-        else {
-            stateMachine(receivedByte);
-
-            if (currentState == STOP) {
-                CYCLE_STOP = TRUE;
-            }
-        }
+        alarmCount++;
+        printf("Alarm #%d\n", alarmCount);
     }
+    printf("Time Out\n");
 
-    // Timeout
-    if (alarmCount == layer.nRetransmissions) {
-        printf("Time Out\n");
-        return -1;
-    }
-
-    return 0;
+    return -1;
 }
 
 int initiateCommunicationReciver() {
-    // Wait for incoming data
-    while (CYCLE_STOP == FALSE) {
-        // Wait for incoming data
-        unsigned char receivedByte;
-        ssize_t bytesRead = read(fd, &receivedByte, 1);
-
-        if (bytesRead == -1) {
-            perror("Error reading from serial port");
-            return -1;
-        }
-        else if (bytesRead == 0) {
-            continue;
-        }
-        else {
-            stateMachine(receivedByte);
-
-            if (currentState == STOP) {
-                CYCLE_STOP = TRUE;
-            }
-        }
+    // Receive SET
+    if (readSupervisionFrame(fd, 0) == -1) {
+        printf("Not received SET\n");
+        return -1;
     }
-
+    // Send UA
     if (sendSupervisionFrame(fd, A_R, C_UA) == -1) {
+        printf("Error sending UA\n");
         return -1;
     }
 
@@ -104,10 +59,6 @@ int initiateCommunicationReciver() {
 // LLOPEN
 ////////////////////////////////////////////////
 int llopen(LinkLayer connectionParameters) {
-
-    // Set alarm function handler
-    (void)signal(SIGALRM, alarmHandler);
-
     // Set connection parameters
     layer = connectionParameters;
 
@@ -215,62 +166,29 @@ int llwrite(const unsigned char *buf, int bufSize) {
 
     frame[frameSize - 1] = FLAG;                             // End Flag
 
-    // Print frame
-    // for (int i = 0; i < frameSize; i++) {
-    //     printf("Frame Byte %d: 0x%x\n", i, frame[i]);                   // Remove
-    // }
-    // printf("\n");
-
     // Send frame
-    CYCLE_STOP = FALSE;
-    alarmEnabled = FALSE;
-    currentState = START;
-    ssize_t bytesRead = 0;
+    int alarmCount = 0;
 
-    while (CYCLE_STOP == FALSE && alarmCount < layer.nRetransmissions) {
-        if (alarmEnabled == FALSE) {
-            // Send frame
-            int bytes = write(fd, frame, frameSize);
-            
-            if (bytes == -1) {
-                perror("Error writing to serial port");
-                return -1;
-            }
-            else if (bytes != frameSize) {
-                perror("Partial write to serial port");
-                return -1;
-            }
-
-            alarm(layer.timeout); // Set alarm to be triggered
-            alarmEnabled = TRUE;
-        }
-
-        // Wait for incoming data
-        unsigned char receivedByte;
-        bytesRead = read(fd, &receivedByte, 1);
-
-        if (bytesRead == -1) {
-            perror("Error reading from serial port");
+    while (alarmCount < layer.nRetransmissions) {
+        // Send frame
+        int bytes = write(fd, frame, frameSize);
+        if (bytes == -1) {
+            perror("Error writing to serial port");
             return -1;
         }
-        else if (bytesRead == 0) {
-            continue;
+        else if (bytes != frameSize) {
+            perror("Partial write to serial port");
+            return -1;
         }
-        else {
-            stateMachine(receivedByte);
 
-            if (currentState == STOP) {
-                CYCLE_STOP = TRUE;
-            }
+        if (readSupervisionFrame(fd, layer.timeout) == 0) {
+            return frameSize;
         }
+        alarmCount++;
     }
+    printf("Time Out\n");
 
-    if (alarmCount == layer.nRetransmissions) {
-        printf("Time Out\n");
-        return -1;
-    }
-
-    return frameSize;
+    return -1;
 }
 
 ////////////////////////////////////////////////
@@ -281,31 +199,11 @@ int llread(unsigned char *packet) {
     unsigned char stuffedFrame[2 * (MAX_PAYLOAD_SIZE + 1) + 5];
     unsigned int stuffedFrameSize = 0;
 
-    CYCLE_STOP = FALSE;
-    currentState = START;
-
-    while (CYCLE_STOP == FALSE) {
-        // Wait for incoming data
-        unsigned char receivedByte;
-        ssize_t bytesRead = read(fd, &receivedByte, 1);
-
-        if (bytesRead == -1) {
-            perror("Error reading from serial port");
-            return -1;
-        }
-        else if (bytesRead == 0) {
-            continue;
-        }
-        else {
-            stuffedFrame[stuffedFrameSize] = receivedByte;
-            stuffedFrameSize++;
-
-            stateMachine(receivedByte);
-
-            if (currentState == STOP) {
-                CYCLE_STOP = TRUE;
-            }
-        }
+    // Read frame
+    stuffedFrameSize = readDataFrame(fd, stuffedFrame);
+    if (stuffedFrameSize == -1) {
+        printf("Error reading data frame\n");
+        return -1;
     }
 
     // Unstuffing Data
@@ -384,116 +282,63 @@ int llread(unsigned char *packet) {
 ////////////////////////////////////////////////
 // LLCLOSE
 ////////////////////////////////////////////////
+int closeTransmitter() {
+    int alarmCount = 0;
+
+    while (alarmCount < layer.nRetransmissions) {
+        // Send DISC
+        if (sendSupervisionFrame(fd, A_T, C_DISC) == -1) {
+            printf("Error sending DISC\n");
+            return -1;
+        }
+
+        // Receive DISC
+        if (readSupervisionFrame(fd, layer.timeout) == 0) {
+            // Send UA
+            if (sendSupervisionFrame(fd, A_T, C_UA) == -1) {
+                printf("Error sending UA\n");
+                return -1;
+            }
+            return 0;
+        }
+        alarmCount++;
+    }
+    printf("Time Out\n");
+    return -1;
+}
+
+int closeReceiver() {
+    // Receive DISC
+    if (readSupervisionFrame(fd, 0) == -1) {
+        printf("Not received DISC\n");
+        return -1;
+    }
+
+    // Send DISC
+    if (sendSupervisionFrame(fd, A_R, C_DISC) == -1) {
+        return -1;
+    }
+
+    // Receive UA
+    if (readSupervisionFrame(fd, 0) == -1) {
+        printf("Not received UA\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 int llclose(int showStatistics) {
     printf("Closing connection\n");
 
-    CYCLE_STOP = FALSE;
-    alarmEnabled = FALSE;
-    alarmCount = 0;
-
-    currentState = START;
 
     // Transmitter
     if (layer.role == LlTx) {
-
-        while (CYCLE_STOP == FALSE && alarmCount < layer.nRetransmissions) {
-            if (alarmEnabled == FALSE) {
-                // Send DISC
-                ssize_t bytes = sendSupervisionFrame(fd, A_T, C_DISC);
-                if (bytes == -1) {
-                    printf("Error sending DISC\n");
-                    return -1;
-                }
-
-                alarm(layer.timeout);
-                alarmEnabled = TRUE;
-            }
-
-            // Wait for incoming data
-            unsigned char receivedByte;
-            ssize_t bytesRead = read(fd, &receivedByte, 1);
-
-            if (bytesRead == -1) {
-                perror("Error reading from serial port");
-                return -1;
-            }
-            else if (bytesRead == 0) {
-                continue;
-            }
-            else {
-                stateMachine(receivedByte);
-
-                if (currentState == STOP) {
-                    CYCLE_STOP = TRUE;
-                }
-
-            }
-        }
-        
-        if (alarmCount == layer.nRetransmissions) {
-            printf("Time Out\n");
-            return -1;
-        }
-
-        // Send UA
-        if (sendSupervisionFrame(fd, A_T, C_UA) == -1) {
-            printf("Error sending UA\n");
-            return -1;
-        }
+        closeTransmitter();
     }
     // Receiver
     else if (layer.role == LlRx) {
-        // Receive DISC
-        while (CYCLE_STOP == FALSE) {
-            // Wait for incoming data
-            unsigned char receivedByte;
-            ssize_t bytesRead = read(fd, &receivedByte, 1);
-
-            if (bytesRead == -1) {
-                perror("Error reading from serial port");
-                return -1;
-            }
-            else if (bytesRead == 0) {
-                continue;
-            }
-            else {
-                stateMachine(receivedByte);
-
-                if (currentState == STOP) {
-                    CYCLE_STOP = TRUE;
-                }
-            }
-        }
-
-        // Send DISC
-        if (sendSupervisionFrame(fd, A_R, C_DISC) == -1) {
-            return -1;
-        }
-
-        // Receive UA
-        CYCLE_STOP = FALSE;
-        currentState = START;
-
-        while (CYCLE_STOP == FALSE) {
-            // Wait for incoming data
-            unsigned char receivedByte;
-            ssize_t bytesRead = read(fd, &receivedByte, 1);
-
-            if (bytesRead == -1) {
-                perror("Error reading from serial port");
-                return -1;
-            }
-            else if (bytesRead == 0) {
-                continue;
-            }
-            else {
-                stateMachine(receivedByte);
-
-                if (currentState == STOP) {
-                    CYCLE_STOP = TRUE;
-                }
-            }
-        }
+        closeReceiver();
     }
     else {
         printf("Invalid role\n");
