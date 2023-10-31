@@ -5,9 +5,7 @@ unsigned char BCC2(const unsigned char *buffer, int length);
 
 int sendSupervisionFrame(int fd, unsigned char a, unsigned char c);
 
-int readSupervisionFrame(int fd, unsigned int timeout);
-
-int readDataFrame(int fd, unsigned char* data);
+int readFrame(int fd, unsigned int timeout, unsigned char* data);
 
 int stuffData(const unsigned char* data, int dataSize, unsigned char* stuffedData);
 

@@ -47,7 +47,7 @@ int sendSupervisionFrame(int fd, unsigned char a, unsigned char c) {
     return 0;
 }
 
-int readSupervisionFrame(int fd, unsigned int timeout) {
+int readFrame(int fd, unsigned int timeout, unsigned char* data) {
     // Ser alarm Handler
     (void)signal(SIGALRM, alarmHandler);
 
@@ -56,34 +56,6 @@ int readSupervisionFrame(int fd, unsigned int timeout) {
         alarmEnabled = TRUE;
         alarm(timeout);
     }
-
-    currentState = START;
-
-    while (alarmEnabled) {
-        // Wait for incoming data
-        unsigned char receivedByte;
-        ssize_t bytesRead = read(fd, &receivedByte, 1);
-
-        if (bytesRead == -1) {
-            perror("Error reading from serial port");
-            return -1;
-        }
-        else if (bytesRead == 0) {
-            continue;
-        }
-        else {
-            stateMachine(receivedByte);
-
-            if (currentState == STOP) {
-                return 0;
-            }
-        }
-    }
-
-    return -1;
-}
-
-int readDataFrame(int fd, unsigned char* data) {
 
     currentState = START;
     int dataIndex = 0;

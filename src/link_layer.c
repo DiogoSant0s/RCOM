@@ -29,9 +29,15 @@ int initiateCommunicationTransmiter() {
             return -1;
         }
 
-        if (readSupervisionFrame(fd, layer.timeout) == 0) {
-            return 0;
+        // Receive UA
+        unsigned char frame[5];
+        if (readFrame(fd, layer.timeout, frame) != -1) {
+            // Verify BCC1
+            if (frame[3] == BCC1(A_R, C_UA)) {
+                return 0;
+            }
         }
+
         alarmCount++;
         printf("Alarm #%d\n", alarmCount);
     }
@@ -42,10 +48,16 @@ int initiateCommunicationTransmiter() {
 
 int initiateCommunicationReciver() {
     // Receive SET
-    if (readSupervisionFrame(fd, 0) == -1) {
+    unsigned char frame[5];
+    if (readFrame(fd, 0, frame) == -1) {
         printf("Not received SET\n");
         return -1;
     }
+    // Verify BCC1
+    if (frame[3] != BCC1(A_T, C_SET)) {
+        return -1;
+    }
+
     // Send UA
     if (sendSupervisionFrame(fd, A_R, C_UA) == -1) {
         printf("Error sending UA\n");
@@ -181,8 +193,12 @@ int llwrite(const unsigned char *buf, int bufSize) {
             return -1;
         }
 
-        if (readSupervisionFrame(fd, layer.timeout) == 0) {
-            return frameSize;
+        unsigned char frame[5];
+        if (readFrame(fd, layer.timeout, frame) != -1) {
+            // Verify BCC1
+            if (frame[3] == BCC1(A_R, frame[2])) {
+                return frameSize;
+            }
         }
         alarmCount++;
     }
@@ -200,7 +216,7 @@ int llread(unsigned char *packet) {
     unsigned int stuffedFrameSize = 0;
 
     // Read frame
-    stuffedFrameSize = readDataFrame(fd, stuffedFrame);
+    stuffedFrameSize = readFrame(fd, 0, stuffedFrame);
     if (stuffedFrameSize == -1) {
         printf("Error reading data frame\n");
         return -1;
@@ -293,13 +309,17 @@ int closeTransmitter() {
         }
 
         // Receive DISC
-        if (readSupervisionFrame(fd, layer.timeout) == 0) {
-            // Send UA
-            if (sendSupervisionFrame(fd, A_T, C_UA) == -1) {
-                printf("Error sending UA\n");
-                return -1;
+        unsigned char frame[5];
+        if (readFrame(fd, layer.timeout, frame) != -1) {
+            // Verify BCC1
+            if (frame[3] == BCC1(A_R, C_DISC)) {
+                // Send UA
+                if (sendSupervisionFrame(fd, A_T, C_UA) == -1) {
+                    printf("Error sending UA\n");
+                    return -1;
+                }
+                return 0;
             }
-            return 0;
         }
         alarmCount++;
     }
@@ -309,8 +329,13 @@ int closeTransmitter() {
 
 int closeReceiver() {
     // Receive DISC
-    if (readSupervisionFrame(fd, 0) == -1) {
+    unsigned char frame[5];
+    if (readFrame(fd, 0, frame) == -1) {
         printf("Not received DISC\n");
+        return -1;
+    }
+    // Verify BCC1
+    if (frame[3] != BCC1(A_T, C_DISC)) {
         return -1;
     }
 
@@ -320,8 +345,12 @@ int closeReceiver() {
     }
 
     // Receive UA
-    if (readSupervisionFrame(fd, 0) == -1) {
+    if (readFrame(fd, 0, frame) == -1) {
         printf("Not received UA\n");
+        return -1;
+    }
+    // Verify BCC1
+    if (frame[3] != BCC1(A_T, C_UA)) {
         return -1;
     }
 
