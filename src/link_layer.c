@@ -15,8 +15,8 @@
 // Supervision Buffer's
 #define FLAG    0x7E
 
-#define A_T     0x01    // Sent by Transmitter
-#define A_R     0x03    // Sent by Receiver
+#define A_R     0x01    // Sent by Receiver
+#define A_T     0x03    // Sent by Transmitter
 
 #define C_INF0  0x00    // Information Frame 0
 #define C_INF1  0x40    // Information Frame 1
@@ -27,7 +27,6 @@
 #define C_RR1   0x85    // Receiver Ready 1
 #define C_REJ0  0x01    // Reject 0
 #define C_REJ1  0x81    // Reject 1
-
 #define C_DISC  0x0B    // Disconnect
 
 #define BCC1(a, c) (a^c) 
@@ -50,28 +49,13 @@ typedef enum {
     START,
     STOP,
     FLAG_OK,
-    FS_BEGIN,
-    FS_END,
 
     // Adress
     A_TX,
     A_RCV,
 
-    // Connection
-    CONN_RCV,
-    CONN_TX,
-    
-    // Data Transmission
-    DATA_RCV,
-    DATA_RR_TX,
-    DATA_REJ_TX,
-    
-    // Connection Termination
-    CLOSE_RCV,
-    CLOSE_TX,
-
-    // Errors
-    BCC1_OK,
+    // Receving Data
+    RECEIVE,
 
 } State;
 
@@ -105,39 +89,15 @@ void alarmHandler(int signal)
 }
 
 // State Machine
-int stateMachine(unsigned char receivedByte, unsigned char* data, int dataSize, int isStuffed) {
+int stateMachine(unsigned char receivedByte) {
 
     switch (currentState) {
         case START:
-            if (receivedByte == FLAG && isStuffed == FALSE) {
+            if (receivedByte == FLAG) {
                 currentState = FLAG_OK;
             }
-            else if (receivedByte == ESCAPE && isStuffed == TRUE) {
-                currentState = FS_BEGIN;
-            }
             break;
-
-        case FS_BEGIN:
-            if (receivedByte == 0x5e) {
-                currentState = FLAG_OK;
-            }
-            else if (receivedByte == ESCAPE) {
-                currentState = FS_BEGIN;
-            }
-            else {
-                currentState = START;
-            }
-            break;
-        
-        case FS_END:
-            if (receivedByte == 0x5e) {
-                currentState = STOP;
-            }
-            else {
-                currentState = START;
-            }
-            break;
-
+ 
         case FLAG_OK:
             if (receivedByte == A_T) {
                 currentState = A_RCV;
@@ -154,36 +114,16 @@ int stateMachine(unsigned char receivedByte, unsigned char* data, int dataSize, 
             break; 
 
         // Address
-        case A_RCV:
-            if (receivedByte == C_INF0 || receivedByte == C_INF1) {
-                currentState = DATA_RCV;
-            }
-            else if (receivedByte == C_SET) {
-                currentState = CONN_RCV;
-            }
-            else if (receivedByte == C_DISC) {
-                currentState = CLOSE_RCV;
-            }
-            else if (receivedByte == FLAG) {
-                currentState = FLAG_OK;
-            }
-            else {
-                currentState = START;
-            }
-            break;
-
         case A_TX:
             if (receivedByte == C_UA) {
-                currentState = CONN_TX;
+                currentState = RECEIVE;
             }
-            else if (receivedByte == C_RR0 || receivedByte == C_RR1) {
-                currentState = DATA_RR_TX;
-            }
-            else if (receivedByte == C_REJ0 || receivedByte == C_REJ1) {
-                currentState = DATA_REJ_TX;
+            else if (receivedByte == C_RR0 || receivedByte == C_RR1 ||
+                     receivedByte == C_REJ0 || receivedByte == C_REJ1) {
+                currentState = RECEIVE;
             }
             else if (receivedByte == C_DISC) {
-                currentState = CLOSE_TX;
+                currentState = RECEIVE;
             }
             else if (receivedByte == FLAG) {
                 currentState = FLAG_OK;
@@ -193,48 +133,18 @@ int stateMachine(unsigned char receivedByte, unsigned char* data, int dataSize, 
             }
             break;
 
-        // Connection
-        case CONN_RCV:
-            if (receivedByte == BCC1(A_T, C_SET)) {
-                currentState = BCC1_OK;
+        case A_RCV:
+            if (receivedByte == C_SET) {
+                currentState = RECEIVE;
             }
-            else if (receivedByte == FLAG) {
-                currentState = FLAG_OK;
+            else if (receivedByte == C_UA) {
+                currentState = RECEIVE;
             }
-            else {
-                currentState = START;
-
+            else if (receivedByte == C_INF0 || receivedByte == C_INF1) {
+                currentState = RECEIVE;
             }
-            break;
-        
-        case CONN_TX:
-            if (receivedByte == BCC1(A_R, C_UA)) {
-                currentState = BCC1_OK;
-            }
-            else if (receivedByte == FLAG) {
-                currentState = FLAG_OK;
-            }
-            else { 
-                currentState = START;
-            }
-            break;
-
-        // Data Transmission
-        case DATA_RCV:
-            if (receivedByte == BCC1(A_T, C_INF0) || receivedByte == BCC1(A_T, C_INF1)) {
-                currentState = BCC1_OK;
-            }
-            else if (receivedByte == FLAG) {
-                currentState = FLAG_OK;
-            }
-            else {
-                currentState = START;
-            }
-            break;
-        
-        case DATA_RR_TX:
-            if (receivedByte == BCC1(A_R, C_RR0) || receivedByte == BCC1(A_R, C_RR1)) {
-                currentState = BCC1_OK;
+            else if (receivedByte == C_DISC) {
+                currentState = RECEIVE;
             }
             else if (receivedByte == FLAG) {
                 currentState = FLAG_OK;
@@ -244,53 +154,13 @@ int stateMachine(unsigned char receivedByte, unsigned char* data, int dataSize, 
             }
             break;
 
-        case DATA_REJ_TX:
-            if (receivedByte == BCC1(A_R, C_REJ0) || receivedByte == BCC1(A_R, C_REJ1)) {
-                currentState = BCC1_OK;
-            }
-            else if (receivedByte == FLAG) {
-                currentState = FLAG_OK;
-            }
-            else {
-                currentState = START;
-            }
-            break;
-
-        // Connection Termination
-        case CLOSE_RCV:
-            if (receivedByte == BCC1(A_T, C_DISC)) {
-                currentState = BCC1_OK;
-            }
-            else if (receivedByte == FLAG) {
-                currentState = FLAG_OK;
-            }
-            else {
-                currentState = START;
-            }
-            break;
-
-        case CLOSE_TX:
-            if (receivedByte == BCC1(A_R, C_DISC)) {
-                currentState = BCC1_OK;
-            }
-            else if (receivedByte == FLAG) {
-                currentState = FLAG_OK;
-            }
-            else {
-                currentState = START;
-            }
-            break;
-        
-        // Errors
-        case BCC1_OK:
-            if (receivedByte == FLAG && isStuffed == FALSE) {
+        // Receive Data
+        case RECEIVE:
+            if (receivedByte == FLAG) {
                 currentState = STOP;
             }
-            else if (receivedByte == ESCAPE && isStuffed == TRUE) {
-                currentState = FS_END;
-            }
             break;
-    
+            
         default:
             break;
     }
@@ -349,12 +219,12 @@ int initiateCommunicationTransmiter() {
         else if (bytesRead == 0) {
             continue;
         }
+        else {
+            stateMachine(receivedByte);
 
-        if (stateMachine(receivedByte, NULL, 0, FALSE) == -1) {
-            return -1;
-        }
-        if (currentState == STOP) {
-            CYCLE_STOP = TRUE;
+            if (currentState == STOP) {
+                CYCLE_STOP = TRUE;
+            }
         }
     }
 
@@ -381,12 +251,12 @@ int initiateCommunicationReciver() {
         else if (bytesRead == 0) {
             continue;
         }
+        else {
+            stateMachine(receivedByte);
 
-        if (stateMachine(receivedByte, NULL, 0, FALSE) == -1) {
-            return -1;
-        }
-        if (currentState == STOP) {
-            CYCLE_STOP = TRUE;
+            if (currentState == STOP) {
+                CYCLE_STOP = TRUE;
+            }
         }
     }
 
@@ -397,58 +267,38 @@ int initiateCommunicationReciver() {
     return 0;
 }
 
+int stuffData(const unsigned char* data, int dataSize, unsigned char* stuffedData) {
+    int stuffedSize = 0;
 
-// Does not work becouse it will change the FLAG to ESCAPE + 0x5E anywhere in the frame. But the file can have data with 0x7D(ESCAPE) + 0x5E
-// void byteStuff(const unsigned char* data, int dataSize, unsigned char* stuffedData, int* stuffedSize) {
-//     int i, j;
-
-//     for (i = 0, j = 0; i < dataSize; i++) {
-//         if (data[i] == FLAG || data[i] == ESCAPE) {
-//             // If data contains FLAG or ESC, stuff it
-//             stuffedData[j++] = ESCAPE;
-//             stuffedData[j++] = data[i] ^ 0x20;  // Toggle the 5th bit
-//         } 
-//         else {
-//             stuffedData[j++] = data[i];
-//         }
-//     }
-
-//     *stuffedSize = j;
-// }
-
-void byteStuff(const unsigned char* data, int dataSize, unsigned char* stuffedData, int* stuffedSize) {
-    int i, j;
-
-    for (i = 0, j = 0; i < dataSize; i++) {
-        if ((data[i] == FLAG || data[i] == ESCAPE) && (i == 0 || i == dataSize - 1)) {
+    // Stuff Data
+    for (int i = 0; i < dataSize; i++) {
+        if (data[i] == FLAG || data[i] == ESCAPE) {
             // If data contains FLAG or ESC, stuff it
-            stuffedData[j++] = ESCAPE;
-            stuffedData[j++] = data[i] ^ 0x20;  // Toggle the 5th bit
+            stuffedData[stuffedSize++] = ESCAPE;
+            stuffedData[stuffedSize++] = data[i] ^ 0x20;  // Toggle the 5th bit
         } 
         else {
-            stuffedData[j++] = data[i];
+            stuffedData[stuffedSize++] = data[i];
         }
     }
 
-    *stuffedSize = j;
+    return stuffedSize;
 }
 
+int destuffData(const unsigned char* stuffedData, int stuffedDataSize, unsigned char* destuffedData) {
+    int destuffedDataSize = 0;
 
-
-void byteDestuff(const unsigned char* stuffedData, int stuffedSize, unsigned char* destuffedData, int* destuffedSize) {
-    int i, j;
-
-    for (i = 0, j = 0; i < stuffedSize; i++) {
-        if (stuffedData[i] == ESCAPE && stuffedData[i + 1] == 0x5E) {
-            destuffedData[j++] = FLAG;
-            i++;  // Skip the next byte (0x5E)
+    for (int i = 0; i < stuffedDataSize; i++) {
+        if (stuffedData[i] == ESCAPE) {
+            // If data contains ESC, destuff it
+            destuffedData[destuffedDataSize++] = stuffedData[++i] ^ 0x20;  // Toggle the 5th bit
         } 
         else {
-            destuffedData[j++] = stuffedData[i];
+            destuffedData[destuffedDataSize++] = stuffedData[i];
         }
     }
 
-    *destuffedSize = j;
+    return destuffedDataSize;
 }
 
 
@@ -487,13 +337,6 @@ int llopen(LinkLayer connectionParameters) {
     newtio.c_cc[VTIME] = 0; // Inter-character timer unused
     newtio.c_cc[VMIN] = 0;  // Blocking read until 0 chars received
 
-    // VTIME e VMIN should be changed in order to protect with a
-    // timeout the reception of the following character(s)
-
-    // Now clean the line and activate the settings for the port
-    // tcflush() discards data written to the object referred to
-    // by fd but not transmitted, or data received but not read,
-    // depending on the value of queue_selector:
     //   TCIFLUSH - flushes data received but not read.
     tcflush(fd, TCIOFLUSH);
 
@@ -529,38 +372,54 @@ int llopen(LinkLayer connectionParameters) {
 // LLWRITE
 ////////////////////////////////////////////////
 int llwrite(const unsigned char *buf, int bufSize) {
-
     static int lastSequence = 1;
-    unsigned int frameSize = bufSize + 6;
+
+    // Stuff Data
+    unsigned int stuffedDataSize = 2 * bufSize;
+    unsigned char stuffedData[stuffedDataSize];
+    stuffedDataSize = stuffData(buf, bufSize, stuffedData);
+
+    // Construct Frame
+    unsigned int frameSize = stuffedDataSize + 6;
     unsigned char frame[frameSize];
 
-    // Frame
-    frame[0] = FLAG;                            // Start Flag
-    frame[1] = A_T;                             // Address
-    // Control Field
-    if (lastSequence == 0) {   
-        lastSequence = 1;
-        frame[2] = C_INF1;            
+    frame[0] = FLAG;                                         // Start Flag
+    frame[1] = A_T;                                          // Address
+
+    if (lastSequence == 0) {                                 //
+        lastSequence = 1;                                    //
+        frame[2] = C_INF1;                                   //
+    }                                                        // Control
+    else if (lastSequence == 1) {                            //
+        lastSequence = 0;                                    //
+        frame[2] = C_INF0;                                   //
     }
-    else if (lastSequence == 1) {
-        lastSequence = 0;
-        frame[2] = C_INF0;                        
-    }
-    frame[3] = BCC1(A_T, frame[2]);               // BCC calculation
-    memcpy(frame + 4, buf, bufSize);            // Copy data payload
-    frame[4 + bufSize] = BCC2(buf, bufSize);    // BCC2
-    frame[5 + bufSize] = FLAG;                  // End Flag
+
+    frame[3] = BCC1(A_T, frame[2]);                          // BCC1
+    memcpy(frame + 4, stuffedData, stuffedDataSize);         // Copy stuffed data
+
+    unsigned char bcc2 = BCC2(buf, bufSize);                 //
+    if (bcc2 == FLAG) {                                      //
+        frameSize++;                                         //
+        frame[frameSize - 3] = ESCAPE;                       //
+        frame[frameSize - 2] = FLAG ^ 0x20;                  //
+    }                                                        // 
+    else if (bcc2 == ESCAPE) {                               // BCC2
+        frameSize++;                                         //
+        frame[frameSize - 3] = ESCAPE;                       //
+        frame[frameSize - 2] = ESCAPE ^ 0x20;                //
+    }                                                        //
+    else {                                                   //
+        frame[frameSize - 2] = bcc2;                         //
+    }                                                        //
+
+    frame[frameSize - 1] = FLAG;                             // End Flag
 
     // Print frame
     // for (int i = 0; i < frameSize; i++) {
-    //     printf("Sended Frame Byte %d: 0x%x\n", i, frame[i]);                   // Remove
+    //     printf("Frame Byte %d: 0x%x\n", i, frame[i]);                   // Remove
     // }
     // printf("\n");
-
-    // Stuffing
-    unsigned char stuffedFrame[2 * (frameSize)];
-    int stuffedFrameSize;
-    byteStuff(frame, frameSize, stuffedFrame, &stuffedFrameSize);
 
     // Send frame
     CYCLE_STOP = FALSE;
@@ -571,13 +430,13 @@ int llwrite(const unsigned char *buf, int bufSize) {
     while (CYCLE_STOP == FALSE && alarmCount < layer.nRetransmissions) {
         if (alarmEnabled == FALSE) {
             // Send frame
-            int bytes = write(fd, stuffedFrame, stuffedFrameSize);
+            int bytes = write(fd, frame, frameSize);
             
             if (bytes == -1) {
                 perror("Error writing to serial port");
                 return -1;
             }
-            else if (bytes != stuffedFrameSize) {
+            else if (bytes != frameSize) {
                 perror("Partial write to serial port");
                 return -1;
             }
@@ -597,17 +456,21 @@ int llwrite(const unsigned char *buf, int bufSize) {
         else if (bytesRead == 0) {
             continue;
         }
+        else {
+            stateMachine(receivedByte);
 
-        // State Machine
-        if (stateMachine(receivedByte, stuffedFrame, stuffedFrameSize, FALSE) == -1) {
-            return -1;
-        }
-        if (currentState == STOP) {
-            CYCLE_STOP = TRUE;
+            if (currentState == STOP) {
+                CYCLE_STOP = TRUE;
+            }
         }
     }
 
-    return bytesRead;
+    if (alarmCount == layer.nRetransmissions) {
+        printf("Time Out\n");
+        return -1;
+    }
+
+    return frameSize;
 }
 
 ////////////////////////////////////////////////
@@ -615,8 +478,9 @@ int llwrite(const unsigned char *buf, int bufSize) {
 ////////////////////////////////////////////////
 int llread(unsigned char *packet) {
 
-    unsigned int frameSize = 0;
-    unsigned char frame[MAX_PAYLOAD_SIZE + 8];
+    unsigned char stuffedFrame[2 * (MAX_PAYLOAD_SIZE + 1) + 5];
+    unsigned int stuffedFrameSize = 0;
+
     CYCLE_STOP = FALSE;
     currentState = START;
 
@@ -633,12 +497,10 @@ int llread(unsigned char *packet) {
             continue;
         }
         else {
-            frame[frameSize] = receivedByte;
-            frameSize++;
-            
-            if (stateMachine(receivedByte, NULL, 0, TRUE) == -1) {
-                return -1;
-            }
+            stuffedFrame[stuffedFrameSize] = receivedByte;
+            stuffedFrameSize++;
+
+            stateMachine(receivedByte);
 
             if (currentState == STOP) {
                 CYCLE_STOP = TRUE;
@@ -646,20 +508,23 @@ int llread(unsigned char *packet) {
         }
     }
 
-    // Print frame
-    // for (int i = 0; i < frameSize; i++) {
-    //     printf("Stuff Frame Byte %d: 0x%x\n", i, frame[i]);                               // Remove
-    // }
-    // printf("\n");
+    // Unstuffing Data
+    unsigned char data[stuffedFrameSize - 5]; 
+    unsigned int dataSize = destuffData(stuffedFrame + 4, stuffedFrameSize - 5, data);
 
-    // Unstuffing
-    unsigned char destuffedFrame[frameSize - 2];
-    int destuffedFrameSize;
+    // Construct Frame
+    unsigned int frameSize = dataSize + 5;
+    unsigned char frame[frameSize];
 
-    byteDestuff(frame, frameSize, destuffedFrame, &destuffedFrameSize);
+    frame[0] = stuffedFrame[0];                                // Start Flag
+    frame[1] = stuffedFrame[1];                                // Address
+    frame[2] = stuffedFrame[2];                                // Control
+    frame[3] = stuffedFrame[3];                                // BCC1
+    memcpy(frame + 4, data, dataSize);                         // Copy data + BCC2
+    frame[frameSize - 1] = stuffedFrame[stuffedFrameSize - 1]; // End Flag
 
     static int lastReceivedSequence = -1;
-    int receivedSequence = (destuffedFrame[2] & 0x40) >> 6;
+    int receivedSequence = (frame[2] & 0x40) >> 6;
 
     // Check duplicate
     if (receivedSequence == lastReceivedSequence) {
@@ -673,53 +538,53 @@ int llread(unsigned char *packet) {
         return 0;
     }
 
-    // Print frame
-    // for (int i = 0 ; i < destuffedFrameSize; i++) {
-    //     printf("Received Frame Byte %d: 0x%02x\n", i, destuffedFrame[i]);                               // Remove
-    // }
-    // printf("\n");
-
     // Check BCC1
-    if (destuffedFrame[3] != BCC1(A_T, destuffedFrame[2])) {
-        printf("BCC1: 0x%x\tExpected: 0x%02x\n", destuffedFrame[3], BCC1(A_T, destuffedFrame[2]));                   // Remove
+    if (frame[3] != BCC1(A_T, frame[2])) {
+        printf("BCC1: 0x%x\tExpected: 0x%02x\n", frame[3], BCC1(A_T, frame[2]));                   // Remove
         // Send REJ
-        if (destuffedFrame[2] == C_INF0) {
+        if (frame[2] == C_INF0) {
             sendSupervisionFrame(A_T, C_REJ0);
         }
-        if (destuffedFrame[2] == C_INF1) {
+        if (frame[2] == C_INF1) {
             sendSupervisionFrame(A_T, C_REJ1);
         }
         return -1;
     }
 
     // Check BCC2
-    if (destuffedFrame[destuffedFrameSize - 2] != BCC2(destuffedFrame + 4, destuffedFrameSize - 6)) {
-        printf("BCC2: 0x%x\tExpected: 0x%02x\n", destuffedFrame[destuffedFrameSize - 2], BCC2(destuffedFrame + 4, destuffedFrameSize - 6));          // Removwe
+    if (frame[frameSize - 2] != BCC2(data, dataSize - 1)) {
+        printf("BCC2: 0x%x\tExpected: 0x%02x\n", frame[frameSize - 2], BCC2(data, dataSize));          // Removwe
         // Send REJ
-        if (destuffedFrame[2] == C_INF0) {
+        if (frame[2] == C_INF0) {
             sendSupervisionFrame(A_T, C_REJ0);
         }
-        else if (destuffedFrame[2] == C_INF1) {
+        else if (frame[2] == C_INF1) {
             sendSupervisionFrame(A_T, C_REJ1);
         }
         return -1;
     }
 
     // Send RR
-    if (destuffedFrame[2] == C_INF0) {
+    if (frame[2] == C_INF0) {
         sendSupervisionFrame(A_R, C_RR0);
     }
-    else if (destuffedFrame[2] == C_INF1) {
+    else if (frame[2] == C_INF1) {
         sendSupervisionFrame(A_R, C_RR1);
     }
 
     lastReceivedSequence = receivedSequence;
 
+    // Print Data
+    for (int i = 0; i < dataSize - 1; i++) {
+        printf("Data Byte %d: 0x%x\n", i, data[i]);              // Remove
+    }
+    printf("\n");
+
     // Copy data payload
-    memcpy(packet, destuffedFrame + 4, destuffedFrameSize - 2);
+    memcpy(packet, data, dataSize - 1);
 
     // Return data payload size
-    return destuffedFrameSize - 6;
+    return dataSize - 1;
 }
 
 ////////////////////////////////////////////////
@@ -760,12 +625,13 @@ int llclose(int showStatistics) {
             else if (bytesRead == 0) {
                 continue;
             }
+            else {
+                stateMachine(receivedByte);
 
-            if (stateMachine(receivedByte, NULL, 0, FALSE) == -1) {
-                return -1;
-            }
-            if (currentState == STOP) {
-                CYCLE_STOP = TRUE;
+                if (currentState == STOP) {
+                    CYCLE_STOP = TRUE;
+                }
+
             }
         }
         
@@ -776,12 +642,12 @@ int llclose(int showStatistics) {
 
         // Send UA
         if (sendSupervisionFrame(A_T, C_UA) == -1) {
+            printf("Error sending UA\n");
             return -1;
         }
     }
     // Receiver
     else if (layer.role == LlRx) {
-
         // Receive DISC
         while (CYCLE_STOP == FALSE) {
             // Wait for incoming data
@@ -795,12 +661,12 @@ int llclose(int showStatistics) {
             else if (bytesRead == 0) {
                 continue;
             }
+            else {
+                stateMachine(receivedByte);
 
-            if (stateMachine(receivedByte, NULL, 0, FALSE) == -1) {
-                return -1;
-            }
-            if (currentState == STOP) {
-                CYCLE_STOP = TRUE;
+                if (currentState == STOP) {
+                    CYCLE_STOP = TRUE;
+                }
             }
         }
 
@@ -810,6 +676,9 @@ int llclose(int showStatistics) {
         }
 
         // Receive UA
+        CYCLE_STOP = FALSE;
+        currentState = START;
+
         while (CYCLE_STOP == FALSE) {
             // Wait for incoming data
             unsigned char receivedByte;
@@ -822,12 +691,12 @@ int llclose(int showStatistics) {
             else if (bytesRead == 0) {
                 continue;
             }
+            else {
+                stateMachine(receivedByte);
 
-            if (stateMachine(receivedByte, NULL, 0, FALSE) == -1) {
-                return -1;
-            }
-            if (currentState == STOP) {
-                CYCLE_STOP = TRUE;
+                if (currentState == STOP) {
+                    CYCLE_STOP = TRUE;
+                }
             }
         }
     }

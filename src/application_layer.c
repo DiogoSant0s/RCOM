@@ -58,6 +58,11 @@ int TransmitterApp(const char *filename) {
     packet[4 + fileSize] = filenameSize;
     memcpy(&packet[5 + fileSize], filename, filenameSize);
 
+    // Print Frame
+    // for (int i = 0; i < packet_size; i++) {
+    //     printf("Packet Byte %d: 0x%02X\n", i, packet[i]);              // Remove
+    // }
+
     if (llwrite(packet, packet_size) == -1) {
         printf("Error sending starting packet.\n");
         return -1;
@@ -90,10 +95,10 @@ int TransmitterApp(const char *filename) {
 
         printf("%dº data packet sent\n", packetsSent++);
         // Print packet
-        // for (int i = 0; i < dataPacketSize; i++) {
-        //     printf("Send Packet Byte %d: 0x%02X\n", i, dataPacket[i]);              // Remove
-        // }
-        // printf("\n");
+        for (int i = 0; i < dataPacketSize; i++) {
+            printf("Send Packet Byte %d: 0x%02X\n", i, dataPacket[i]);              // Remove
+        }
+        printf("\n");
 
         sequenceNumber = 1 - sequenceNumber;  // Toggle sequence number (0 or 1)
 
@@ -107,13 +112,11 @@ int TransmitterApp(const char *filename) {
     // Ending packet
     packet[0] = ENDING_PACKET;
 
-
     if (llwrite(packet, packet_size) == -1) {
         printf("Error sending ending packet.\n");
         return -1;
     }
     printf("Ending packet sent\n");
-
 
     // Close file
     fclose(file);
@@ -132,10 +135,9 @@ int TransmitterApp(const char *filename) {
 int ReceiverApp(const char *filename) {
 
     FILE *file;
-    unsigned int sequenceNumber = 0; // TODO
     unsigned int totalBytesReceived = 0;
     unsigned int packetsReceived = 0;
-    unsigned char dataPacket[MAX_PAYLOAD_SIZE];
+    unsigned char dataPacket[MAX_PAYLOAD_SIZE + 4];
 
     while (TRUE) {
         ssize_t bytesRead = llread(dataPacket);
@@ -147,41 +149,42 @@ int ReceiverApp(const char *filename) {
         if (bytesRead == 0) {
             continue;
         }
-
-        // Print packet
-        // for (int i = 0; i < bytesRead; i++) {
-        //     printf("Received Packet Byte %d: 0x%02X\n", i, dataPacket[i]);                          // Remove
-        // }
-        // printf("\n");
-
-        // 
-        if (dataPacket[0] == STARTING_PACKET) {
-            file = fopen(filename, "wb");
-            if (file == NULL) {
-                printf("Error opening file.\n");
-                return -1;
+        else {
+            // Print packet
+            for (int i = 0; i < bytesRead; i++) {
+                printf("Received Byte %d: 0x%02X\n", i, dataPacket[i]);              // Remove
             }
-            printf("Received starting packet\n");
-        }
-        else if (dataPacket[0] == MIDDLE_PACKET) {
-            // Write the data to the file
-            totalBytesReceived += bytesRead - 4;
-            if (fwrite(&dataPacket[4], 1, bytesRead - 4, file) != bytesRead - 4) {
-                printf("Error writing data to file.\n");
+            printf("\n");
+
+            if (dataPacket[0] == STARTING_PACKET) {
+                file = fopen(filename, "wb");
+                if (file == NULL) {
+                    printf("Error opening file.\n");
+                    return -1;
+                }
+                printf("Received starting packet\n");
+            }
+            else if (dataPacket[0] == MIDDLE_PACKET) {
+                // Write the data to the file
+                totalBytesReceived += bytesRead - 4;
+                if (fwrite(&dataPacket[4], 1, bytesRead - 4, file) != bytesRead - 4) {
+                    printf("Error writing data to file.\n");
+                    fclose(file);
+                    return -1;
+                }
+                fflush(file); // Remove
+                printf("Received %dº data packet\n", packetsReceived++);
+            }
+            else if (dataPacket[0] == ENDING_PACKET) {
+                fclose(file);
+                printf("Received ending packet\n");
+                break;
+            }
+            else {
+                printf("Error: Invalid control field.\n");
                 fclose(file);
                 return -1;
             }
-            printf("Received %dº data packet\n", packetsReceived++);
-        }
-        else if (dataPacket[0] == ENDING_PACKET) {
-            fclose(file);
-            printf("Received ending packet\n");
-            break;
-        }
-        else {
-            printf("Error: Invalid control field.\n");
-            fclose(file);
-            return -1;
         }
     }
 
