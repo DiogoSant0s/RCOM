@@ -16,6 +16,9 @@ int fd;                     // File descriptor for serial port
 struct termios oldtio;      // Old Terminal I/O structure
 struct termios newtio;      // New Terminal I/O structure
 
+////////////////////////////////////////////////
+// LLOPEN
+////////////////////////////////////////////////
 int initiateCommunicationTransmiter() {
     int alarmCount = 0;
 
@@ -23,7 +26,7 @@ int initiateCommunicationTransmiter() {
         // Send SET
         int bytes = sendSupervisionFrame(fd, A_T, C_SET);
         if (bytes == -1) {
-            printf("Error sending SET\n");
+            printf("ERROR - Not possible to send UA\n");
             return -1;
         }
 
@@ -37,9 +40,8 @@ int initiateCommunicationTransmiter() {
         }
 
         alarmCount++;
-        printf("Alarm #%d\n", alarmCount);
     }
-    printf("Time Out\n");
+    printf("ERROR - Time Out\n");
 
     return -1;
 }
@@ -48,7 +50,7 @@ int initiateCommunicationReciver() {
     // Receive SET
     unsigned char frame[5];
     if (readFrame(fd, 0, frame) == -1) {
-        printf("Not received SET\n");
+        printf("ERROR - Not received SET\n");
         return -1;
     }
     // Verify BCC1
@@ -58,16 +60,13 @@ int initiateCommunicationReciver() {
 
     // Send UA
     if (sendSupervisionFrame(fd, A_R, C_UA) == -1) {
-        printf("Error sending UA\n");
+        printf("ERROR - Not possible to send UA\n");
         return -1;
     }
 
     return 0;
 }
 
-////////////////////////////////////////////////
-// LLOPEN
-////////////////////////////////////////////////
 int llopen(LinkLayer connectionParameters) {
     // Set connection parameters
     layer = connectionParameters;
@@ -80,10 +79,9 @@ int llopen(LinkLayer connectionParameters) {
     }
 
     // Save current port settings
-    if (tcgetattr(fd, &oldtio) == -1)
-    {
-        perror("tcgetattr");
-        exit(-1);
+    if (tcgetattr(fd, &oldtio) == -1) {
+        printf("ERROR - Not possible to save current port settings\n");
+        return -1;
     }
 
     // Clear struct for new port settings
@@ -102,13 +100,10 @@ int llopen(LinkLayer connectionParameters) {
     tcflush(fd, TCIOFLUSH);
 
     // Set new port settings
-    if (tcsetattr(fd, TCSANOW, &newtio) == -1)
-    {
-        perror("tcsetattr");
-        exit(-1);
+    if (tcsetattr(fd, TCSANOW, &newtio) == -1) {
+        printf("ERROR - Not possible to set New port settings\n");
+        return -1;
     }
-
-    printf("New termios structure set\n");
 
     if (layer.role == LlTx) {
         if (initiateCommunicationTransmiter() == -1) {
@@ -121,11 +116,10 @@ int llopen(LinkLayer connectionParameters) {
         }
     }
     else {
-        printf("Invalid role\n");
+        printf("ERROR - Invalid Role\n");
         return -1;
     }
 
-    printf("Connection established\n");
     return 0;
 }
 
@@ -183,11 +177,11 @@ int llwrite(const unsigned char *buf, int bufSize) {
         // Send frame
         int bytes = write(fd, frame, frameSize);
         if (bytes == -1) {
-            perror("Error writing to serial port");
+            printf("ERROR - Not possible to write to Serial Port\n");
             return -1;
         }
         else if (bytes != frameSize) {
-            perror("Partial write to serial port");
+            printf("ERROR - Partial write to Serial Port\n");
             return -1;
         }
 
@@ -200,7 +194,7 @@ int llwrite(const unsigned char *buf, int bufSize) {
         }
         alarmCount++;
     }
-    printf("Time Out\n");
+    printf("ERROR - Time Out\n");
 
     return -1;
 }
@@ -216,7 +210,7 @@ int llread(unsigned char *packet) {
     // Read frame
     stuffedFrameSize = readFrame(fd, 0, stuffedFrame);
     if (stuffedFrameSize == -1) {
-        printf("Error reading data frame\n");
+        printf("ERROR - Not possible to read Data Frame\n");
         return -1;
     }
 
@@ -240,7 +234,7 @@ int llread(unsigned char *packet) {
 
     // Check duplicate
     if (receivedSequence == lastReceivedSequence) {
-        printf("Duplicate\n");
+        printf("ERROR - Received duplicated frame\n");
         if (receivedSequence == 0) {
             sendSupervisionFrame(fd, A_R, C_RR0);
         } 
@@ -252,7 +246,7 @@ int llread(unsigned char *packet) {
 
     // Check BCC1
     if (frame[3] != BCC1(A_T, frame[2])) {
-        printf("BCC1: 0x%x\tExpected: 0x%02x\n", frame[3], BCC1(A_T, frame[2]));                   // Remove
+        printf("ERROR - BCC1 failed - (Received: 0x%x \t Expected: 0x%x)\n", frame[3], BCC2(A_T, frame[2]));
         // Send REJ
         if (frame[2] == C_INF0) {
             sendSupervisionFrame(fd, A_T, C_REJ0);
@@ -265,7 +259,7 @@ int llread(unsigned char *packet) {
 
     // Check BCC2
     if (frame[frameSize - 2] != BCC2(data, dataSize - 1)) {
-        printf("BCC2: 0x%x\tExpected: 0x%02x\n", frame[frameSize - 2], BCC2(data, dataSize));          // Removwe
+        printf("ERROR - BCC2 failed - (Received: 0x%x \t Expected: 0x%x)\n", frame[frameSize - 2], BCC2(data, dataSize));
         // Send REJ
         if (frame[2] == C_INF0) {
             sendSupervisionFrame(fd, A_T, C_REJ0);
@@ -296,13 +290,13 @@ int llread(unsigned char *packet) {
 ////////////////////////////////////////////////
 // LLCLOSE
 ////////////////////////////////////////////////
-int closeTransmitter() {
+int terminateCommunicationTransmitter() {
     int alarmCount = 0;
 
     while (alarmCount < layer.nRetransmissions) {
         // Send DISC
         if (sendSupervisionFrame(fd, A_T, C_DISC) == -1) {
-            printf("Error sending DISC\n");
+            printf("ERROR - Not possible to send DISC\n");
             return -1;
         }
 
@@ -313,7 +307,7 @@ int closeTransmitter() {
             if (frame[3] == BCC1(A_R, C_DISC)) {
                 // Send UA
                 if (sendSupervisionFrame(fd, A_T, C_UA) == -1) {
-                    printf("Error sending UA\n");
+                    printf("ERROR - Not possible to send UA\n");
                     return -1;
                 }
                 return 0;
@@ -321,15 +315,16 @@ int closeTransmitter() {
         }
         alarmCount++;
     }
-    printf("Time Out\n");
+    printf("ERROR - Time Out\n");
+
     return -1;
 }
 
-int closeReceiver() {
+int terminateCommunicationReceiver() {
     // Receive DISC
     unsigned char frame[5];
     if (readFrame(fd, 0, frame) == -1) {
-        printf("Not received DISC\n");
+        printf("ERROR - Not received DISC\n");
         return -1;
     }
     // Verify BCC1
@@ -344,7 +339,7 @@ int closeReceiver() {
 
     // Receive UA
     if (readFrame(fd, 0, frame) == -1) {
-        printf("Not received UA\n");
+        printf("ERROR - Not received UA\n");
         return -1;
     }
     // Verify BCC1
@@ -356,38 +351,30 @@ int closeReceiver() {
 }
 
 int llclose(int showStatistics) {
-    printf("Closing connection\n");
-
-
     // Transmitter
     if (layer.role == LlTx) {
-        closeTransmitter();
+        terminateCommunicationTransmitter();
     }
     // Receiver
     else if (layer.role == LlRx) {
-        closeReceiver();
+        terminateCommunicationReceiver();
     }
     else {
-        printf("Invalid role\n");
+        printf("ERROR - Invalide Role\n");
         return -1;
     }
 
     // Restore old port settings
-    if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
-    {
-        perror("tcsetattr");
-        exit(-1);
-    }
-
-    printf("Old termios structure restored\n");
-
-    // Close serial port
-    if (close(fd) == -1) {
-        perror("Error closing serial port");
+    if (tcsetattr(fd, TCSANOW, &oldtio) == -1) {
+        printf("ERROR - Not possible to restore old port settings\n");
         return -1;
     }
 
-    printf("Serial port closed\n");
+    // Close serial port
+    if (close(fd) == -1) {
+        printf("ERROR - Not possible to close Serial Port\n");
+        return -1;
+    }
 
     return 0;
 }

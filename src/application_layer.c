@@ -15,10 +15,8 @@
 #define FILE_NAME 1
 
 int TransmitterApp(const char *filename) {
-    
+    // Get file information
     struct stat file_stat;
-    clock_t start_t = clock(); // Start time
-
     if (stat(filename, &file_stat) < 0) {
         perror("Error getting file information.");
         return -1;
@@ -27,7 +25,7 @@ int TransmitterApp(const char *filename) {
     // Open file
     FILE *file = fopen(filename, "rb");
     if (file == NULL) {
-        perror("Error opening file.");
+        printf("Error - Not possible to open file\n");
         return -1;
     }
 
@@ -46,14 +44,12 @@ int TransmitterApp(const char *filename) {
     memcpy(&packet[5 + fileSize], filename, filenameSize);
 
     if (llwrite(packet, packet_size) == -1) {
-        printf("Error sending starting packet.\n");
+        printf("Error - Not possible to send starting packet\n");
         return -1;
     }
-    printf("Starting packet sent\n");
     
     // Middle packets
     unsigned sequenceNumber = 0;
-    unsigned packetsSent = 1;
     unsigned char buf[MAX_PAYLOAD_SIZE];
 
     while (TRUE) {
@@ -71,10 +67,9 @@ int TransmitterApp(const char *filename) {
 
         // Send the data packet
         if (llwrite(dataPacket, dataPacketSize) == -1) {
-            printf("Error sending data packet.\n");
+            printf("Error - Not possible to send data packet\n");
             return -1;
         }
-        printf("%dº data packet sent\n", packetsSent++);
 
         sequenceNumber = 1 - sequenceNumber;  // Toggle sequence number (0 or 1)
 
@@ -83,42 +78,29 @@ int TransmitterApp(const char *filename) {
             break;
         }
     }
-    printf("Middle packets sent\n");
 
     // Ending packet
     packet[0] = ENDING_PACKET;
 
     if (llwrite(packet, packet_size) == -1) {
-        printf("Error sending ending packet.\n");
+        printf("Error - Not possible to send ending packet\n");
         return -1;
     }
-    printf("Ending packet sent\n");
 
     // Close file
     fclose(file);
-
-    // Calculate and print transfer information
-    clock_t end_t = clock();
-    double total_t = (double)(end_t - start_t) / CLOCKS_PER_SEC;
-
-    printf("\nTotal time taken: %f seconds\n", total_t);
-    printf("Size transfered: %d bytes\n", (int) file_stat.st_size);
-    printf("Transfer Speed: %f B/s\n\n", file_stat.st_size/total_t);
-
     return 0;
 }
 
 int ReceiverApp(const char *filename) {
 
     FILE *file;
-    unsigned int totalBytesReceived = 0;
-    unsigned int packetsReceived = 0;
     unsigned char dataPacket[MAX_PAYLOAD_SIZE + 4];
 
     while (TRUE) {
         ssize_t bytesRead = llread(dataPacket);
         if (bytesRead == -1) {
-            printf("Error reading data packet.\n");
+            printf("Error - Not possible to read data packet.\n");
             fclose(file);
             return -1;
         }
@@ -129,37 +111,30 @@ int ReceiverApp(const char *filename) {
             if (dataPacket[0] == STARTING_PACKET) {
                 file = fopen(filename, "wb");
                 if (file == NULL) {
-                    printf("Error opening file.\n");
+                    printf("Error - Not possible to open file\n");
                     return -1;
                 }
-                printf("Received starting packet\n");
             }
             else if (dataPacket[0] == MIDDLE_PACKET) {
                 // Write the data to the file
-                totalBytesReceived += bytesRead - 4;
                 if (fwrite(&dataPacket[4], 1, bytesRead - 4, file) != bytesRead - 4) {
-                    printf("Error writing data to file.\n");
+                    printf("Error - Not possible to write data to file.\n");
                     fclose(file);
                     return -1;
                 }
-                fflush(file); // Remove
-                printf("Received %dº data packet\n", packetsReceived++);
             }
             else if (dataPacket[0] == ENDING_PACKET) {
                 fclose(file);
-                printf("Received ending packet\n");
                 break;
             }
             else {
-                printf("Error: Invalid control field.\n");
+                printf("Error - Invalid packet.\n");
                 fclose(file);
                 return -1;
             }
         }
     }
 
-    // Print transfer information
-    printf("Received %u bytes of data\n", totalBytesReceived);
     return 0;
 }
 
@@ -188,15 +163,43 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     if (llopen(layer) == -1) {
         return ;
     }
+    printf("\nConnection established ✓\n");
     
     // Run application layer
+    clock_t start_t, end_t; // Time variables
     if (layer.role == LlTx) {
-        TransmitterApp(filename);
+        start_t = clock(); // Start time
+
+        TransmitterApp(filename);  // Main App
+
+        end_t = clock();   // End time
+
+        printf("All data Sent ✓\n");
     }
     if (layer.role == LlRx) {
-        ReceiverApp(filename);
+        start_t = clock(); // Start time
+
+        ReceiverApp(filename);     // Main App
+
+        end_t = clock();   // End time
+
+        printf("All data Received ✓\n");
     }
 
     // Close link layer
     llclose(FALSE);
+    printf("Connection Closed ✓\n");
+
+    // Print statistics
+    struct stat file_stat;
+    if (stat(filename, &file_stat) < 0) {
+        perror("Error - Not possible to get file info (Stats will not be printed).");
+    }
+    else {
+        printf("\nStatistics:\n");
+        printf("  -Time elapsed: %f seconds\n", (double)(end_t - start_t) / CLOCKS_PER_SEC);
+        printf("  -Size transfered: %lld bytes\n", file_stat.st_size);
+        printf("  -Transfer rate: %f bytes/second\n", (double)file_stat.st_size / ((double)(end_t - start_t) / CLOCKS_PER_SEC));
+    }
+
 }
