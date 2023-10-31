@@ -58,11 +58,6 @@ int TransmitterApp(const char *filename) {
     packet[4 + fileSize] = filenameSize;
     memcpy(&packet[5 + fileSize], filename, filenameSize);
 
-    // Print Frame
-    // for (int i = 0; i < packet_size; i++) {
-    //     printf("Packet Byte %d: 0x%02X\n", i, packet[i]);              // Remove
-    // }
-
     if (llwrite(packet, packet_size) == -1) {
         printf("Error sending starting packet.\n");
         return -1;
@@ -92,13 +87,7 @@ int TransmitterApp(const char *filename) {
             printf("Error sending data packet.\n");
             return -1;
         }
-
         printf("%dº data packet sent\n", packetsSent++);
-        // Print packet
-        for (int i = 0; i < dataPacketSize; i++) {
-            printf("Send Packet Byte %d: 0x%02X\n", i, dataPacket[i]);              // Remove
-        }
-        printf("\n");
 
         sequenceNumber = 1 - sequenceNumber;  // Toggle sequence number (0 or 1)
 
@@ -150,12 +139,6 @@ int ReceiverApp(const char *filename) {
             continue;
         }
         else {
-            // Print packet
-            for (int i = 0; i < bytesRead; i++) {
-                printf("Received Byte %d: 0x%02X\n", i, dataPacket[i]);              // Remove
-            }
-            printf("\n");
-
             if (dataPacket[0] == STARTING_PACKET) {
                 file = fopen(filename, "wb");
                 if (file == NULL) {
