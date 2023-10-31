@@ -95,13 +95,12 @@ int TransmitterApp(const char *filename) {
 }
 
 int ReceiverApp(const char *filename) {
-
     FILE *file;
     unsigned char dataPacket[MAX_PAYLOAD_SIZE + 4];
 
     // Receive Packets
     while (TRUE) {
-        ssize_t bytesRead = llread(dataPacket);
+        size_t bytesRead = llread(dataPacket);
         if (bytesRead == -1) {
             printf("Error - Not possible to read data packet.\n");
             fclose(file);
@@ -141,11 +140,7 @@ int ReceiverApp(const char *filename) {
     return 0;
 }
 
-
-void applicationLayer(const char *serialPort, const char *role, int baudRate,
-                      int nTries, int timeout, const char *filename)
-{
-
+void applicationLayer(const char *serialPort, const char *role, int baudRate, int nTries, int timeout, const char *filename) {
     // Create link layer
     LinkLayer layer;
 
