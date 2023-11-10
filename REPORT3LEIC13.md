@@ -172,7 +172,7 @@ The protocol demonstrated its capability to reliably transfer the 11.0 KB .gif f
 
 #### Error Handling
 
-When errors were intentionally introduced into the transmission process, the protocol exhibited robust error handling mechanisms. It promptly detected errors in the received frames, leading to the retransmission of the affected frames. This retransmission process ensured the delivery of error-free data, reinforcing the protocol's reliability.
+When errors were intentionally introduced into the transmission process, the protocol exhibited subpar error handling mechanisms. It promptly detected errors in the received frames, but it did not lead to the retransmission of the affected frames, consequently not ensuring the delivery of error-free data.
 
 #### Efficiency Analysis
 

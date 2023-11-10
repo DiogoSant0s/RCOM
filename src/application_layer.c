@@ -158,9 +158,12 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
     layer.timeout = timeout;
 
     // Open link layer
+    clock_t start_t_open, end_t_open; // Time variables
+    start_t_open = clock(); // Start time
     if (llopen(layer) == -1) {
-        return ;
+        perror("Error - Not possible to open link layer.");
     }
+    end_t_open = clock();   // End time
     printf("\nConnection established ✓\n");
     
     // Run application layer
@@ -185,7 +188,10 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
     }
 
     // Close link layer
+    clock_t start_t_close, end_t_close; // Time variables
+    start_t_close = clock(); // Start time
     llclose(FALSE);
+    end_t_close = clock();   // End time
     printf("Connection Closed ✓\n");
 
     // Print statistics
@@ -195,8 +201,11 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
     }
     else {
         printf("\nStatistics:\n");
-        printf("  -Time elapsed: %f seconds\n", (double)(end_t - start_t) / CLOCKS_PER_SEC);
-        printf("  -Size transfered: %lld bytes\n", file_stat.st_size);
+        printf("  -Total time elapsed: %f seconds\n", (double)(end_t_close - start_t_open) / CLOCKS_PER_SEC);
+        printf("  -Time elapsed (llopen): %f seconds\n", (double)(end_t_open - start_t_open) / CLOCKS_PER_SEC);
+        printf("  -Time elapsed transfering data: %f seconds\n", (double)(end_t - start_t) / CLOCKS_PER_SEC);
+        printf("  -Time elapsed (llclose): %f seconds\n", (double)(end_t_close - start_t_close) / CLOCKS_PER_SEC);
+        printf("  -Size transfered: %ld bytes\n", file_stat.st_size);
         printf("  -Transfer rate: %f bytes/second\n", (double)file_stat.st_size / ((double)(end_t - start_t) / CLOCKS_PER_SEC));
     }
 
